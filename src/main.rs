@@ -37,6 +37,8 @@ struct DownloadRecord {
     date_completed: Option<DateTime<Utc>>,
     downloaded_bytes: u64, // Quantidade já baixada (para resume)
     total_bytes: u64,      // Tamanho total do arquivo
+    #[serde(default)]      // Para compatibilidade com arquivos antigos
+    was_paused: bool,      // Se estava pausado quando o app foi fechado
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -175,8 +177,35 @@ fn build_ui(app: &Application) {
     // Carrega downloads salvos e adiciona à lista
     if !saved_records.is_empty() {
         content_stack.set_visible_child_name("list");
+
+        // Separa downloads que devem retomar automaticamente
+        let mut to_resume = Vec::new();
+
         for record in saved_records {
-            add_completed_download(&list_box, &record, &state);
+            // Se estava em progresso e NÃO estava pausado, marca para retomar
+            if record.status == DownloadStatus::InProgress && !record.was_paused {
+                to_resume.push(record.url.clone());
+            } else {
+                // Caso contrário, mostra como download completo/pausado/falhado
+                add_completed_download(&list_box, &record, &state);
+            }
+        }
+
+        // Remove downloads que vão retomar do JSON (evita duplicação)
+        if !to_resume.is_empty() {
+            if let Ok(app_state) = state.lock() {
+                if let Ok(mut records) = app_state.records.lock() {
+                    for url in &to_resume {
+                        records.retain(|r| &r.url != url);
+                    }
+                    save_downloads(&records);
+                }
+            }
+        }
+
+        // Retoma downloads ativos
+        for url in to_resume {
+            add_download(&list_box, &url, &state);
         }
     }
 
@@ -246,7 +275,13 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .build();
 
     let status_text = match record.status {
-        DownloadStatus::InProgress => "Pausado",
+        DownloadStatus::InProgress => {
+            if record.was_paused {
+                "Pausado"
+            } else {
+                "Retomando..."
+            }
+        }
         DownloadStatus::Completed => "Concluído",
         DownloadStatus::Failed => "Falhou",
         DownloadStatus::Cancelled => "Cancelado",
@@ -478,7 +513,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         file_path: None,
     }));
 
-    // Cria registro de download inicial (em progresso)
+    // Cria registro de download inicial (em progresso e não pausado)
     let initial_record = DownloadRecord {
         url: url.to_string(),
         filename: filename.clone(),
@@ -488,6 +523,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         date_completed: None,
         downloaded_bytes: 0,
         total_bytes: 0,
+        was_paused: false,  // Iniciando download ativo
     };
 
     let record_url = url.to_string();
@@ -504,6 +540,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
             // Atualiza o registro existente
             existing.status = DownloadStatus::InProgress;
             existing.date_completed = None;
+            existing.was_paused = false;  // Retomando, então não está pausado
         } else {
             // Adiciona novo registro
             records.push(initial_record);
@@ -531,7 +568,6 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let delete_btn_clone = delete_btn.clone();
     let download_task_clone_msg = download_task.clone();
     let record_url_clone = record_url.clone();
-    let filename_clone = filename.clone();
     let state_records_clone = state_records.clone();
 
     glib::spawn_future_local(async move {
@@ -547,11 +583,16 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
                     // Atualiza registro a cada 5 segundos
                     if last_save.elapsed().as_secs() >= 5 {
-                        // Extrai bytes baixados do status_text (formato: "XX MB/YY MB")
+                        // Verifica se está pausado neste momento
+                        let is_currently_paused = if let Ok(task) = download_task_clone_msg.lock() {
+                            task.paused
+                        } else {
+                            false
+                        };
+
                         if let Ok(mut records) = state_records_clone.lock() {
                             if let Some(record) = records.iter_mut().find(|r| r.url == record_url_clone) {
-                                // Aqui você pode atualizar downloaded_bytes e total_bytes
-                                // Por enquanto, vou deixar assim para não quebrar o fluxo
+                                record.was_paused = is_currently_paused;
                             }
                             save_downloads(&records);
                         }
@@ -632,15 +673,28 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
     // Handler para botão de pausa/retomar
     let download_task_clone = download_task.clone();
+    let state_records_clone4 = state_records.clone();
+    let record_url_clone4 = record_url.clone();
+
     pause_btn.connect_clicked(move |btn| {
         if let Ok(mut task) = download_task_clone.lock() {
             task.paused = !task.paused;
-            if task.paused {
+            let is_paused = task.paused;
+
+            if is_paused {
                 btn.set_icon_name("media-playback-start-symbolic");
                 btn.set_tooltip_text(Some("Retomar"));
             } else {
                 btn.set_icon_name("media-playback-pause-symbolic");
                 btn.set_tooltip_text(Some("Pausar"));
+            }
+
+            // Atualiza was_paused no registro
+            if let Ok(mut records) = state_records_clone4.lock() {
+                if let Some(record) = records.iter_mut().find(|r| r.url == record_url_clone4) {
+                    record.was_paused = is_paused;
+                }
+                save_downloads(&records);
             }
         }
     });
