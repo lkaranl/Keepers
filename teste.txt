@@ -1,0 +1,32 @@
+https://pcsx2bios.com/wp-content/uploads/download/ps2/ps2-bios-usa.zip
+
+
+
+https://distro.ibiblio.org/zorinos/18/Zorin-OS-18-Core-64-bit.iso
+
+
+ Espaçamento e organização:
+Adicionar separadores visuais entre downloads — usar gtk4::Separator entre itens da lista - v
+Ajustar padding interno dos cards — melhorar espaçamento interno dos itens de download - v
+Adicionar sombras sutis nos cards — usar CSS para elevação nos itens de download - erro
+
+Visual e hierarquia:
+Ícones de status mais visíveis — usar ícones coloridos (verde=completo, vermelho=erro, amarelo=pausado) - v 
+Melhorar tipografia — usar diferentes tamanhos/pesos para título, status e metadados - v
+Adicionar badges visuais — badges coloridos para status (completo, pausado, erro) - 
+
+Layout responsivo:
+Redimensionamento inteligente — ajustar layout quando a janela for redimensionada
+Agrupar botões em menu — usar MenuButton para ações secundárias quando houver muitos botões
+Melhorar espaçamento em telas pequenas — reduzir margens em janelas menores
+
+UX visual:
+Animações sutis — transições ao adicionar/remover downloads
+Melhor feedback visual — hover states nos botões e cards
+Agrupar informações — agrupar data e status em uma área visual
+
+Organização de informações:
+Layout em grid — mostrar informações em colunas (nome, tamanho, data, status)
+Indicador de tamanho do arquivo — mostrar tamanho total do arquivo no card
+Melhorar barra de progresso — adicionar cores diferentes por status (azul=ativo, verde=completo)
+Lista focada em melhorias visuais e de layout.

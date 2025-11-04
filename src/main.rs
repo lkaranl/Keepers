@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider, StyleContext};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager};
@@ -288,6 +288,48 @@ fn build_ui(app: &Application) {
 
     window.set_content(Some(&main_box));
     
+    // Adiciona CSS customizado para badges de status
+    let provider = CssProvider::new();
+    let css = "
+        .status-badge {
+            border-radius: 12px;
+            padding: 4px 12px;
+            margin: 0;
+        }
+        
+        .status-badge.completed {
+            background-color: alpha(#10b981, 0.15);
+            color: #10b981;
+        }
+        
+        .status-badge.in-progress {
+            background-color: alpha(#3b82f6, 0.15);
+            color: #3b82f6;
+        }
+        
+        .status-badge.paused {
+            background-color: alpha(#fbbf24, 0.15);
+            color: #fbbf24;
+        }
+        
+        .status-badge.failed {
+            background-color: alpha(#ef4444, 0.15);
+            color: #ef4444;
+        }
+        
+        .status-badge.cancelled {
+            background-color: alpha(#6b7280, 0.15);
+            color: #6b7280;
+        }
+    ";
+    
+    provider.load_from_data(css);
+    
+    // Adiciona o provider CSS ao display
+    if let Some(display) = gtk4::gdk::Display::default() {
+        StyleContext::add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    
     // Configura para não fechar completamente quando clicar no X (minimiza para tray)
     window.connect_close_request(move |window| {
         window.set_visible(false);
@@ -320,18 +362,25 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         row_box.set_opacity(0.5);
     }
 
-    // Header com título
+    // Header com título - tipografia melhorada
     let title_label = Label::builder()
-        .label(&record.filename)
         .halign(gtk4::Align::Start)
         .hexpand(true)
-        .css_classes(vec!["title-3"])
+        .css_classes(vec!["title-2"])
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .build();
 
     // Se cancelado, adiciona risco no meio do texto usando Pango markup
     if is_cancelled {
-        title_label.set_markup(&format!("<s>{}</s>", glib::markup_escape_text(&record.filename)));
+        title_label.set_markup(&format!(
+            "<s><span weight='bold' size='large'>{}</span></s>",
+            glib::markup_escape_text(&record.filename)
+        ));
+    } else {
+        title_label.set_markup(&format!(
+            "<span weight='bold' size='large'>{}</span>",
+            glib::markup_escape_text(&record.filename)
+        ));
     }
 
     // Barra de progresso
@@ -362,7 +411,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .spacing(16)
         .build();
 
-    // Box para status com ícone e texto
+    // Box para status com badge colorido
     let status_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .spacing(8)
@@ -383,9 +432,31 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         DownloadStatus::Cancelled => ("Cancelado", "⊘"),
     };
 
-    // Ícone de status com cor
+    // Badge colorido para status
+    let status_badge = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(6)
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["status-badge"])
+        .build();
+
+    // Determina a classe CSS baseada no status
+    let badge_class = match record.status {
+        DownloadStatus::Completed => "completed",
+        DownloadStatus::InProgress => {
+            if record.was_paused {
+                "paused"
+            } else {
+                "in-progress"
+            }
+        }
+        DownloadStatus::Failed => "failed",
+        DownloadStatus::Cancelled => "cancelled",
+    };
+    status_badge.add_css_class(badge_class);
+
+    // Ícone de status
     let status_icon_label = Label::builder()
-        .label(status_icon)
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption"])
         .build();
@@ -405,24 +476,36 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     };
 
     status_icon_label.set_markup(&format!(
-        "<span foreground='{}' size='large' weight='bold'>{}</span>",
-        icon_color, status_icon
+        "<span size='large' weight='bold'>{}</span>",
+        status_icon
     ));
 
+    // Texto de status
     let status_label = Label::builder()
-        .label(status_text)
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption"])
         .build();
+    
+    status_label.set_markup(&format!(
+        "<span weight='medium'>{}</span>",
+        glib::markup_escape_text(status_text)
+    ));
 
-    status_box.append(&status_icon_label);
-    status_box.append(&status_label);
+    status_badge.append(&status_icon_label);
+    status_badge.append(&status_label);
+    status_box.append(&status_badge);
 
     let date_label = Label::builder()
-        .label(&format!("{}", record.date_added.format("%d/%m/%Y %H:%M")))
         .halign(gtk4::Align::End)
         .css_classes(vec!["caption", "dim-label"])
         .build();
+    
+    // Data em tamanho menor e peso normal
+    let date_text = format!("{}", record.date_added.format("%d/%m/%Y %H:%M"));
+    date_label.set_markup(&format!(
+        "<span size='small'>{}</span>",
+        glib::markup_escape_text(&date_text)
+    ));
 
     info_box.append(&status_box);
     info_box.append(&date_label);
@@ -643,12 +726,17 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .build();
 
     let title_label = Label::builder()
-        .label(&filename)
         .halign(gtk4::Align::Start)
         .hexpand(true)
-        .css_classes(vec!["title-3"])
+        .css_classes(vec!["title-2"])
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .build();
+    
+    // Título com peso bold e tamanho large
+    title_label.set_markup(&format!(
+        "<span weight='bold' size='large'>{}</span>",
+        glib::markup_escape_text(&filename)
+    ));
 
     // Tag de chunks paralelos (inicialmente escondida)
     let parallel_tag = Label::builder()
@@ -678,7 +766,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .spacing(16)
         .build();
 
-    // Box para status com ícone e texto
+    // Box para status com badge colorido
     let status_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .spacing(8)
@@ -686,23 +774,33 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .hexpand(true)
         .build();
 
-    // Ícone de status (inicialmente azul para "em progresso")
+    // Badge colorido para status (inicialmente azul para "em progresso")
+    let status_badge = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(6)
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["status-badge", "in-progress"])
+        .build();
+
+    // Ícone de status
     let status_icon_label = Label::builder()
-        .label("⬇")
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption"])
         .build();
     
-    status_icon_label.set_markup("<span foreground='#3b82f6' size='large' weight='bold'>⬇</span>");
+    status_icon_label.set_markup("<span size='large' weight='bold'>⬇</span>");
 
+    // Texto de status
     let status_label = Label::builder()
-        .label("Iniciando...")
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption"])
         .build();
+    
+    status_label.set_markup("<span weight='medium'>Iniciando...</span>");
 
-    status_box.append(&status_icon_label);
-    status_box.append(&status_label);
+    status_badge.append(&status_icon_label);
+    status_badge.append(&status_label);
+    status_box.append(&status_badge);
 
     let speed_eta_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -711,16 +809,20 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .build();
 
     let speed_label = Label::builder()
-        .label("")
         .halign(gtk4::Align::End)
         .css_classes(vec!["caption"])
         .build();
+    
+    // Velocidade com peso semibold para destaque (inicialmente vazio)
+    speed_label.set_markup("<span weight='600'></span>");
 
     let eta_label = Label::builder()
-        .label("")
         .halign(gtk4::Align::End)
         .css_classes(vec!["caption", "dim-label"])
         .build();
+    
+    // ETA em tamanho small e peso normal (inicialmente vazio)
+    eta_label.set_markup("<span size='small'></span>");
 
     speed_eta_box.append(&speed_label);
     speed_eta_box.append(&eta_label);
@@ -847,6 +949,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
     // Monitora mensagens na thread principal do GTK usando spawn_future_local
     let progress_bar_clone = progress_bar.clone();
+    let status_badge_clone = status_badge.clone();
     let status_icon_label_clone = status_icon_label.clone();
     let status_label_clone = status_label.clone();
     let speed_label_clone = speed_label.clone();
@@ -870,22 +973,42 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     progress_bar_clone.set_fraction(progress);
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
                     
-                    // Atualiza ícone de status baseado no status_text
-                    let (icon, color) = if status_text.contains("Pausado") || status_text.contains("Pausar") {
-                        ("⏸", "#fbbf24") // amarelo
+                    // Atualiza ícone de status e badge baseado no status_text
+                    let (icon, badge_class) = if status_text.contains("Pausado") || status_text.contains("Pausar") {
+                        ("⏸", "paused")
                     } else if status_text.contains("Erro") || status_text.contains("Falha") {
-                        ("✕", "#ef4444") // vermelho
+                        ("✕", "failed")
                     } else {
-                        ("⬇", "#3b82f6") // azul (em progresso)
+                        ("⬇", "in-progress")
                     };
                     
+                    // Atualiza classe CSS do badge
+                    status_badge_clone.remove_css_class("completed");
+                    status_badge_clone.remove_css_class("in-progress");
+                    status_badge_clone.remove_css_class("paused");
+                    status_badge_clone.remove_css_class("failed");
+                    status_badge_clone.remove_css_class("cancelled");
+                    status_badge_clone.add_css_class(badge_class);
+                    
                     status_icon_label_clone.set_markup(&format!(
-                        "<span foreground='{}' size='large' weight='bold'>{}</span>",
-                        color, icon
+                        "<span size='large' weight='bold'>{}</span>",
+                        icon
                     ));
-                    status_label_clone.set_text(&status_text);
-                    speed_label_clone.set_text(&speed);
-                    eta_label_clone.set_text(&eta);
+                    // Status com peso medium
+                    status_label_clone.set_markup(&format!(
+                        "<span weight='medium'>{}</span>",
+                        glib::markup_escape_text(&status_text)
+                    ));
+                    // Velocidade com peso semibold
+                    speed_label_clone.set_markup(&format!(
+                        "<span weight='600'>{}</span>",
+                        glib::markup_escape_text(&speed)
+                    ));
+                    // ETA em tamanho small
+                    eta_label_clone.set_markup(&format!(
+                        "<span size='small'>{}</span>",
+                        glib::markup_escape_text(&eta)
+                    ));
                     parallel_tag_clone.set_visible(parallel_chunks);
 
                     // Atualiza registro a cada 5 segundos
@@ -910,11 +1033,18 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     progress_bar_clone.set_fraction(1.0);
                     progress_bar_clone.set_text(Some("100%"));
                     
+                    // Atualiza badge para completo (verde)
+                    status_badge_clone.remove_css_class("in-progress");
+                    status_badge_clone.remove_css_class("paused");
+                    status_badge_clone.remove_css_class("failed");
+                    status_badge_clone.remove_css_class("cancelled");
+                    status_badge_clone.add_css_class("completed");
+                    
                     // Ícone verde para completo
-                    status_icon_label_clone.set_markup("<span foreground='#10b981' size='large' weight='bold'>✓</span>");
-                    status_label_clone.set_text("Concluído");
-                    speed_label_clone.set_text("✓");
-                    eta_label_clone.set_text("");
+                    status_icon_label_clone.set_markup("<span size='large' weight='bold'>✓</span>");
+                    status_label_clone.set_markup("<span weight='medium'>Concluído</span>");
+                    speed_label_clone.set_markup("<span weight='600'>✓</span>");
+                    eta_label_clone.set_markup("<span size='small'></span>");
 
                     // Esconde botões de controle e mostra botões de arquivo completo
                     pause_btn_clone.set_visible(false);
@@ -943,20 +1073,31 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     break;
                 }
                 DownloadMessage::Error(err) => {
-                    // Atualiza ícone de status baseado no tipo de erro
-                    let (icon, color, status) = if err.contains("Cancelado") {
-                        ("⊘", "#6b7280", DownloadStatus::Cancelled) // cinza
+                    // Atualiza ícone de status e badge baseado no tipo de erro
+                    let (icon, badge_class, status) = if err.contains("Cancelado") {
+                        ("⊘", "cancelled", DownloadStatus::Cancelled) // cinza
                     } else {
-                        ("✕", "#ef4444", DownloadStatus::Failed) // vermelho
+                        ("✕", "failed", DownloadStatus::Failed) // vermelho
                     };
                     
+                    // Atualiza classe CSS do badge
+                    status_badge_clone.remove_css_class("completed");
+                    status_badge_clone.remove_css_class("in-progress");
+                    status_badge_clone.remove_css_class("paused");
+                    status_badge_clone.remove_css_class("failed");
+                    status_badge_clone.remove_css_class("cancelled");
+                    status_badge_clone.add_css_class(badge_class);
+                    
                     status_icon_label_clone.set_markup(&format!(
-                        "<span foreground='{}' size='large' weight='bold'>{}</span>",
-                        color, icon
+                        "<span size='large' weight='bold'>{}</span>",
+                        icon
                     ));
-                    status_label_clone.set_text(&format!("Erro: {}", err));
-                    speed_label_clone.set_text("");
-                    eta_label_clone.set_text("");
+                    status_label_clone.set_markup(&format!(
+                        "<span weight='medium'>Erro: {}</span>",
+                        glib::markup_escape_text(&err)
+                    ));
+                    speed_label_clone.set_markup("<span weight='600'></span>");
+                    eta_label_clone.set_markup("<span size='small'></span>");
                     pause_btn_clone.set_visible(false);
                     cancel_btn_clone.set_visible(false);
                     delete_btn_clone.set_visible(true);
@@ -1040,6 +1181,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let record_url_clone2 = record_url.clone();
     let title_label_clone_cancel = title_label.clone();
     let progress_bar_clone_cancel = progress_bar.clone();
+    let status_badge_clone_cancel = status_badge.clone();
     let status_label_clone_cancel = status_label.clone();
     let speed_label_clone_cancel = speed_label.clone();
     let eta_label_clone_cancel = eta_label.clone();
@@ -1078,10 +1220,17 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         // Atualiza barra de progresso
         progress_bar_clone_cancel.add_css_class("cancelled-progress");
 
+        // Atualiza badge para cancelado (cinza)
+        status_badge_clone_cancel.remove_css_class("in-progress");
+        status_badge_clone_cancel.remove_css_class("paused");
+        status_badge_clone_cancel.remove_css_class("failed");
+        status_badge_clone_cancel.remove_css_class("completed");
+        status_badge_clone_cancel.add_css_class("cancelled");
+        
         // Atualiza status
-        status_label_clone_cancel.set_text("Cancelado");
-        speed_label_clone_cancel.set_text("");
-        eta_label_clone_cancel.set_text("");
+        status_label_clone_cancel.set_markup("<span weight='medium'>Cancelado</span>");
+        speed_label_clone_cancel.set_markup("<span weight='600'></span>");
+        eta_label_clone_cancel.set_markup("<span size='small'></span>");
 
         // Adiciona botão de reiniciar
         let restart_btn = Button::builder()
