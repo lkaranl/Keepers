@@ -7,6 +7,7 @@ use std::time::Instant;
 use futures_util::StreamExt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use tokio::sync::Mutex as AsyncMutex;
 use async_channel;
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
@@ -15,7 +16,7 @@ const APP_ID: &str = "com.downstream.app";
 
 #[derive(Clone, Debug)]
 enum DownloadMessage {
-    Progress(f64, String, String, String), // (progress, status_text, speed, eta)
+    Progress(f64, String, String, String, bool), // (progress, status_text, speed, eta, parallel_chunks)
     Complete,
     Error(String),
 }
@@ -422,7 +423,13 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
     let filename = url.split('/').last().unwrap_or("download").to_string();
 
-    // Header com título
+    // Header com título e tag de chunks paralelos
+    let title_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .halign(gtk4::Align::Start)
+        .build();
+
     let title_label = Label::builder()
         .label(&filename)
         .halign(gtk4::Align::Start)
@@ -430,6 +437,22 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .css_classes(vec!["title-3"])
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .build();
+
+    // Tag de chunks paralelos (inicialmente escondida)
+    let parallel_tag = Label::builder()
+        .label("⚡ Chunks Paralelos")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption", "dim-label"])
+        .visible(false)
+        .tooltip_text("Download otimizado: arquivo baixado em múltiplas partes simultâneas")
+        .build();
+
+    // Adiciona estilo para destacar a tag
+    let ctx = parallel_tag.style_context();
+    ctx.add_class("tag");
+
+    title_box.append(&title_label);
+    title_box.append(&parallel_tag);
 
     // Barra de progresso
     let progress_bar = gtk4::ProgressBar::builder()
@@ -514,7 +537,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     buttons_box.append(&cancel_btn);
     buttons_box.append(&delete_btn);
 
-    row_box.append(&title_label);
+    row_box.append(&title_box);
     row_box.append(&progress_bar);
     row_box.append(&info_box);
     row_box.append(&buttons_box);
@@ -578,6 +601,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let status_label_clone = status_label.clone();
     let speed_label_clone = speed_label.clone();
     let eta_label_clone = eta_label.clone();
+    let parallel_tag_clone = parallel_tag.clone();
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
     let open_btn_clone = open_btn.clone();
@@ -591,12 +615,13 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
         while let Ok(msg) = msg_rx.recv().await {
             match msg {
-                DownloadMessage::Progress(progress, status_text, speed, eta) => {
+                DownloadMessage::Progress(progress, status_text, speed, eta, parallel_chunks) => {
                     progress_bar_clone.set_fraction(progress);
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
                     status_label_clone.set_text(&status_text);
                     speed_label_clone.set_text(&speed);
                     eta_label_clone.set_text(&eta);
+                    parallel_tag_clone.set_visible(parallel_chunks);
 
                     // Atualiza registro a cada 5 segundos
                     if last_save.elapsed().as_secs() >= 5 {
@@ -804,14 +829,22 @@ fn start_download(
                     }
                 };
 
-            // Faz requisição HEAD para obter tamanho total
-            let total_size = match client.head(&url).send().await {
+            // Faz requisição HEAD para obter tamanho total e verificar suporte a Range
+            let (total_size, supports_range) = match client.head(&url).send().await {
                 Ok(resp) => {
-                    resp.headers()
+                    let size = resp.headers()
                         .get(reqwest::header::CONTENT_LENGTH)
                         .and_then(|v| v.to_str().ok())
                         .and_then(|v| v.parse::<u64>().ok())
-                        .unwrap_or(0)
+                        .unwrap_or(0);
+                    
+                    let supports = resp.headers()
+                        .get(reqwest::header::ACCEPT_RANGES)
+                        .and_then(|v| v.to_str().ok())
+                        .map(|v| v == "bytes")
+                        .unwrap_or(false);
+                    
+                    (size, supports)
                 }
                 Err(e) => {
                     let _ = tx.send(DownloadMessage::Error(format!("Erro ao obter info: {}", e))).await;
@@ -819,19 +852,20 @@ fn start_download(
                 }
             };
 
-            // Verifica se existe arquivo parcial para resume
-            let mut downloaded = if temp_path.exists() {
-                std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0)
-            } else {
-                0
-            };
+            // Se não suporta Range ou tamanho desconhecido, usa download sequencial
+            if !supports_range || total_size == 0 || total_size < 1024 * 1024 {
+                // Download sequencial (código original)
+                download_sequential(&client, &url, &temp_path, &file_path, total_size, &tx, &download_task, false).await;
+                return;
+            }
 
-            // Abre ou cria arquivo para escrita
-            let mut file = match if downloaded > 0 {
-                OpenOptions::new().append(true).open(&temp_path)
-            } else {
-                File::create(&temp_path)
-            } {
+            // Download paralelo em chunks
+            const NUM_CHUNKS: u64 = 4;
+            let chunk_size = total_size / NUM_CHUNKS;
+            let last_chunk_size = total_size - (chunk_size * (NUM_CHUNKS - 1));
+
+            // Cria arquivo vazio
+            let file_handle = match tokio::fs::File::create(&temp_path).await {
                 Ok(f) => f,
                 Err(e) => {
                     let _ = tx.send(DownloadMessage::Error(format!("Erro ao criar arquivo: {}", e))).await;
@@ -839,101 +873,104 @@ fn start_download(
                 }
             };
 
-            // Faz requisição com Range header para resume
-            let mut request = client.get(&url);
-            if downloaded > 0 {
-                request = request.header(reqwest::header::RANGE, format!("bytes={}-", downloaded));
+            // Pre-aloca espaço no arquivo
+            if let Err(e) = file_handle.set_len(total_size).await {
+                let _ = tx.send(DownloadMessage::Error(format!("Erro ao pre-alocar arquivo: {}", e))).await;
+                return;
             }
+            drop(file_handle);
 
-            let response = match request.send().await {
-                Ok(resp) => resp,
+            // Abre arquivo para escrita paralela
+            let file = match tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(&temp_path)
+                .await
+            {
+                Ok(f) => Arc::new(AsyncMutex::new(f)),
                 Err(e) => {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro na requisição: {}", e))).await;
+                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao abrir arquivo: {}", e))).await;
                     return;
                 }
             };
 
-            if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-                let _ = tx.send(DownloadMessage::Error(format!("Status HTTP: {}", response.status()))).await;
+            // Progresso compartilhado entre chunks
+            let progress = Arc::new(AsyncMutex::new(vec![0u64; NUM_CHUNKS as usize]));
+            let last_update = Arc::new(AsyncMutex::new(Instant::now()));
+            let last_downloaded = Arc::new(AsyncMutex::new(0u64));
+
+            // Baixa cada chunk em paralelo
+            let mut handles = Vec::new();
+
+            for chunk_id in 0..NUM_CHUNKS {
+                let start = chunk_id * chunk_size;
+                let end = if chunk_id == NUM_CHUNKS - 1 {
+                    start + last_chunk_size - 1
+                } else {
+                    start + chunk_size - 1
+                };
+
+                let url_clone = url.clone();
+                let client_clone = client.clone();
+                let file_clone = file.clone();
+                let progress_clone = progress.clone();
+                let download_task_clone = download_task.clone();
+                let tx_clone = tx.clone();
+                let last_update_clone = last_update.clone();
+                let last_downloaded_clone = last_downloaded.clone();
+
+                let handle = tokio::spawn(async move {
+                    download_chunk(
+                        &client_clone,
+                        &url_clone,
+                        start,
+                        end,
+                        chunk_id as usize,
+                        file_clone,
+                        progress_clone,
+                        total_size,
+                        &download_task_clone,
+                        &tx_clone,
+                        last_update_clone,
+                        last_downloaded_clone,
+                    ).await
+                });
+
+                handles.push(handle);
+            }
+
+            // Aguarda todos os chunks terminarem
+            let mut all_success = true;
+            for handle in handles {
+                match handle.await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => {
+                        eprintln!("Erro no chunk: {}", e);
+                        all_success = false;
+                    }
+                    Err(e) => {
+                        eprintln!("Erro ao aguardar chunk: {:?}", e);
+                        all_success = false;
+                    }
+                }
+            }
+
+            drop(file);
+
+            // Verifica cancelamento antes de verificar sucesso
+            if let Ok(task) = download_task.lock() {
+                if task.cancelled {
+                    let _ = std::fs::remove_file(&temp_path);
+                    let _ = tx.send(DownloadMessage::Error("Cancelado".to_string())).await;
+                    return;
+                }
+            }
+
+            if !all_success {
+                let _ = tx.send(DownloadMessage::Error("Erro ao baixar chunks".to_string())).await;
                 return;
             }
 
-            // Stream de download
-            let mut stream = response.bytes_stream();
-            let mut last_update = Instant::now();
-            let mut last_downloaded = downloaded;
-
-            while let Some(chunk_result) = stream.next().await {
-                // Verifica se foi cancelado ou está pausado
-                loop {
-                    let (cancelled, paused) = {
-                        if let Ok(task) = download_task.lock() {
-                            (task.cancelled, task.paused)
-                        } else {
-                            (false, false)
-                        }
-                    };
-
-                    if cancelled {
-                        let _ = std::fs::remove_file(&temp_path);
-                        let _ = tx.send(DownloadMessage::Error("Cancelado".to_string())).await;
-                        return;
-                    }
-
-                    if !paused {
-                        break;
-                    }
-
-                    // Aguarda enquanto pausado
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let _ = tx.send(DownloadMessage::Error(format!("Erro ao baixar: {}", e))).await;
-                        return;
-                    }
-                };
-
-                if let Err(e) = file.write_all(&chunk) {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao escrever: {}", e))).await;
-                    return;
-                }
-
-                downloaded += chunk.len() as u64;
-
-                // Atualiza progresso a cada 200ms
-                if last_update.elapsed().as_millis() >= 200 {
-                    let progress = if total_size > 0 {
-                        downloaded as f64 / total_size as f64
-                    } else {
-                        0.0
-                    };
-
-                    let speed_bytes = (downloaded - last_downloaded) as f64 / last_update.elapsed().as_secs_f64();
-                    let speed_text = format_speed(speed_bytes);
-
-                    // Calcula ETA (tempo restante estimado)
-                    let eta_text = if total_size > 0 && speed_bytes > 0.0 {
-                        let remaining_bytes = total_size - downloaded;
-                        let eta_seconds = remaining_bytes as f64 / speed_bytes;
-                        format_eta(eta_seconds)
-                    } else {
-                        String::new()
-                    };
-
-                    let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
-
-                    let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text, eta_text)).await;
-
-                    last_update = Instant::now();
-                    last_downloaded = downloaded;
-                }
-            }
-
             // Download completo - renomeia arquivo
-            drop(file);
             if let Err(e) = std::fs::rename(&temp_path, &file_path) {
                 let _ = tx.send(DownloadMessage::Error(format!("Erro ao finalizar: {}", e))).await;
                 return;
@@ -947,6 +984,259 @@ fn start_download(
             let _ = tx.send(DownloadMessage::Complete).await;
         });
     });
+}
+
+async fn download_chunk(
+    client: &reqwest::Client,
+    url: &str,
+    start: u64,
+    end: u64,
+    chunk_id: usize,
+    file: Arc<AsyncMutex<tokio::fs::File>>,
+    progress: Arc<AsyncMutex<Vec<u64>>>,
+    total_size: u64,
+    download_task: &Arc<Mutex<DownloadTask>>,
+    tx: &async_channel::Sender<DownloadMessage>,
+    last_update: Arc<AsyncMutex<Instant>>,
+    last_downloaded: Arc<AsyncMutex<u64>>,
+) -> Result<(), String> {
+    let range_header = format!("bytes={}-{}", start, end);
+    
+    let response = client
+        .get(url)
+        .header(reqwest::header::RANGE, &range_header)
+        .send()
+        .await
+        .map_err(|e| format!("Erro na requisição: {}", e))?;
+
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(format!("Status HTTP: {}", response.status()));
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut current_pos = start;
+
+    while let Some(chunk_result) = stream.next().await {
+        // Verifica cancelamento/pausa
+        loop {
+            let (cancelled, paused) = {
+                if let Ok(task) = download_task.lock() {
+                    (task.cancelled, task.paused)
+                } else {
+                    (false, false)
+                }
+            };
+
+            if cancelled {
+                return Err("Cancelado".to_string());
+            }
+
+            if !paused {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let chunk = chunk_result.map_err(|e| format!("Erro ao baixar chunk: {}", e))?;
+        let chunk_len = chunk.len() as u64;
+
+        // Escreve no arquivo na posição correta
+        {
+            let mut file_guard = file.lock().await;
+            use tokio::io::AsyncSeekExt;
+            use tokio::io::AsyncWriteExt;
+            file_guard.seek(std::io::SeekFrom::Start(current_pos)).await
+                .map_err(|e| format!("Erro ao posicionar arquivo: {}", e))?;
+            file_guard.write_all(&chunk).await
+                .map_err(|e| format!("Erro ao escrever arquivo: {}", e))?;
+        }
+
+        current_pos += chunk_len;
+
+        // Atualiza progresso deste chunk
+        {
+            let mut progress_guard = progress.lock().await;
+            progress_guard[chunk_id] = current_pos - start;
+        }
+
+        // Atualiza progresso total a cada 200ms
+        {
+            let mut last_update_guard = last_update.lock().await;
+            if last_update_guard.elapsed().as_millis() >= 200 {
+                let progress_guard = progress.lock().await;
+                let total_downloaded: u64 = progress_guard.iter().sum();
+                let progress_ratio = if total_size > 0 {
+                    total_downloaded as f64 / total_size as f64
+                } else {
+                    0.0
+                };
+
+                let mut last_downloaded_guard = last_downloaded.lock().await;
+                let elapsed_secs = last_update_guard.elapsed().as_secs_f64();
+                let speed_bytes = if elapsed_secs > 0.0 {
+                    (total_downloaded as f64 - *last_downloaded_guard as f64) / elapsed_secs
+                } else {
+                    0.0
+                };
+                let speed_text = format_speed(speed_bytes);
+
+                let eta_text = if total_size > 0 && speed_bytes > 0.0 {
+                    let remaining_bytes = total_size - total_downloaded;
+                    let eta_seconds = remaining_bytes as f64 / speed_bytes;
+                    format_eta(eta_seconds)
+                } else {
+                    String::new()
+                };
+
+                let status = format!("{}/{}", format_bytes(total_downloaded), format_bytes(total_size));
+                let _ = tx.send(DownloadMessage::Progress(progress_ratio, status, speed_text, eta_text, true)).await;
+
+                *last_update_guard = Instant::now();
+                *last_downloaded_guard = total_downloaded;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn download_sequential(
+    client: &reqwest::Client,
+    url: &str,
+    temp_path: &PathBuf,
+    file_path: &PathBuf,
+    total_size: u64,
+    tx: &async_channel::Sender<DownloadMessage>,
+    download_task: &Arc<Mutex<DownloadTask>>,
+    parallel_chunks: bool,
+) {
+    // Verifica se existe arquivo parcial para resume
+    let mut downloaded = if temp_path.exists() {
+        std::fs::metadata(temp_path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        0
+    };
+
+    // Abre ou cria arquivo para escrita
+    let mut file = match if downloaded > 0 {
+        OpenOptions::new().append(true).open(temp_path)
+    } else {
+        File::create(temp_path)
+    } {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(DownloadMessage::Error(format!("Erro ao criar arquivo: {}", e))).await;
+            return;
+        }
+    };
+
+    // Faz requisição com Range header para resume
+    let mut request = client.get(url);
+    if downloaded > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={}-", downloaded));
+    }
+
+    let response = match request.send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            let _ = tx.send(DownloadMessage::Error(format!("Erro na requisição: {}", e))).await;
+            return;
+        }
+    };
+
+    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        let _ = tx.send(DownloadMessage::Error(format!("Status HTTP: {}", response.status()))).await;
+        return;
+    }
+
+    // Stream de download
+    let mut stream = response.bytes_stream();
+    let mut last_update = Instant::now();
+    let mut last_downloaded = downloaded;
+
+    while let Some(chunk_result) = stream.next().await {
+        // Verifica se foi cancelado ou está pausado
+        loop {
+            let (cancelled, paused) = {
+                if let Ok(task) = download_task.lock() {
+                    (task.cancelled, task.paused)
+                } else {
+                    (false, false)
+                }
+            };
+
+            if cancelled {
+                let _ = std::fs::remove_file(temp_path);
+                let _ = tx.send(DownloadMessage::Error("Cancelado".to_string())).await;
+                return;
+            }
+
+            if !paused {
+                break;
+            }
+
+            // Aguarda enquanto pausado
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let chunk = match chunk_result {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx.send(DownloadMessage::Error(format!("Erro ao baixar: {}", e))).await;
+                return;
+            }
+        };
+
+        if let Err(e) = file.write_all(&chunk) {
+            let _ = tx.send(DownloadMessage::Error(format!("Erro ao escrever: {}", e))).await;
+            return;
+        }
+
+        downloaded += chunk.len() as u64;
+
+        // Atualiza progresso a cada 200ms
+        if last_update.elapsed().as_millis() >= 200 {
+            let progress = if total_size > 0 {
+                downloaded as f64 / total_size as f64
+            } else {
+                0.0
+            };
+
+            let speed_bytes = (downloaded - last_downloaded) as f64 / last_update.elapsed().as_secs_f64();
+            let speed_text = format_speed(speed_bytes);
+
+            // Calcula ETA (tempo restante estimado)
+            let eta_text = if total_size > 0 && speed_bytes > 0.0 {
+                let remaining_bytes = total_size - downloaded;
+                let eta_seconds = remaining_bytes as f64 / speed_bytes;
+                format_eta(eta_seconds)
+            } else {
+                String::new()
+            };
+
+            let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
+
+            let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text, eta_text, parallel_chunks)).await;
+
+            last_update = Instant::now();
+            last_downloaded = downloaded;
+        }
+    }
+
+    // Download completo - renomeia arquivo
+    drop(file);
+    if let Err(e) = std::fs::rename(temp_path, file_path) {
+        let _ = tx.send(DownloadMessage::Error(format!("Erro ao finalizar: {}", e))).await;
+        return;
+    }
+
+    // Salva o caminho do arquivo no download task
+    if let Ok(mut task) = download_task.lock() {
+        task.file_path = Some(file_path.clone());
+    }
+
+    let _ = tx.send(DownloadMessage::Complete).await;
 }
 
 fn format_bytes(bytes: u64) -> String {
