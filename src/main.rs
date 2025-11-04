@@ -1,7 +1,7 @@
 use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider};
 use gtk4::glib;
 use gtk4::gio;
-use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager};
+use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager, MessageDialog, ResponseAppearance};
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -182,45 +182,32 @@ fn build_ui(app: &Application) {
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
     let header = HeaderBar::new();
-    
-    // Adiciona menu button no header para system tray
-    let menu_button = MenuButton::builder()
-        .icon_name("folder-download-symbolic")
-        .tooltip_text("Menu do DownStream")
-        .build();
-    
-    let menu = gio::Menu::new();
-    menu.append(Some("Mostrar Janela"), Some("app.show"));
-    menu.append(Some("Sair"), Some("app.quit"));
-    
-    let popover = PopoverMenu::from_model(Some(&menu));
-    menu_button.set_popover(Some(&popover));
-    
-    header.pack_start(&menu_button);
-    
-    main_box.append(&header);
 
-    let input_box = GtkBox::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(12)
-        .margin_top(24)
-        .margin_bottom(24)
-        .margin_start(24)
-        .margin_end(24)
-        .build();
-
-    let url_entry = Entry::builder()
-        .placeholder_text("Cole o link do arquivo aqui...")
-        .hexpand(true)
-        .build();
-
-    let download_btn = Button::builder()
-        .label("Baixar")
+    // Botão principal de adicionar download no header (moderno)
+    let add_download_btn = Button::builder()
+        .icon_name("list-add-symbolic")
+        .tooltip_text("Adicionar novo download (Ctrl+N)")
         .css_classes(vec!["suggested-action"])
         .build();
 
-    input_box.append(&url_entry);
-    input_box.append(&download_btn);
+    header.pack_end(&add_download_btn);
+
+    // Adiciona menu button no header para system tray
+    let menu_button = MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .tooltip_text("Menu principal")
+        .build();
+
+    let menu = gio::Menu::new();
+    menu.append(Some("Mostrar Janela"), Some("app.show"));
+    menu.append(Some("Sair"), Some("app.quit"));
+
+    let popover = PopoverMenu::from_model(Some(&menu));
+    menu_button.set_popover(Some(&popover));
+
+    header.pack_end(&menu_button);
+
+    main_box.append(&header);
 
     let scrolled = ScrolledWindow::builder()
         .hexpand(true)
@@ -237,19 +224,42 @@ fn build_ui(app: &Application) {
 
     scrolled.set_child(Some(&list_box));
 
-    let empty_state = StatusPage::builder()
-        .icon_name("folder-download-symbolic")
-        .title("Nenhum download")
-        .description("Adicione um link acima para começar")
+    // Estado vazio com botão de ação proeminente
+    let empty_state_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
         .vexpand(true)
+        .valign(gtk4::Align::Center)
+        .spacing(24)
         .build();
 
+    let empty_status = StatusPage::builder()
+        .icon_name("folder-download-symbolic")
+        .title("Nenhum download")
+        .description("Clique no botão + acima ou pressione Ctrl+N para adicionar um novo download")
+        .build();
+
+    // Botão proeminente no estado vazio (ação secundária, pois o primário está no header)
+    let empty_add_btn = Button::builder()
+        .label("Adicionar Download")
+        .icon_name("list-add-symbolic")
+        .halign(gtk4::Align::Center)
+        .css_classes(vec!["pill", "suggested-action"])
+        .build();
+
+    let empty_btn_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .halign(gtk4::Align::Center)
+        .build();
+    empty_btn_box.append(&empty_add_btn);
+
+    empty_state_box.append(&empty_status);
+    empty_state_box.append(&empty_btn_box);
+
     let content_stack = gtk4::Stack::new();
-    content_stack.add_named(&empty_state, Some("empty"));
+    content_stack.add_named(&empty_state_box, Some("empty"));
     content_stack.add_named(&scrolled, Some("list"));
     content_stack.set_visible_child_name("empty");
 
-    main_box.append(&input_box);
     main_box.append(&content_stack);
 
     // Carrega downloads salvos e adiciona à lista
@@ -287,23 +297,88 @@ fn build_ui(app: &Application) {
         }
     }
 
-    let list_box_clone = list_box.clone();
-    let url_entry_clone = url_entry.clone();
-    let content_stack_clone = content_stack.clone();
-    let state_clone = state.clone();
+    // Cria função para mostrar o diálogo de adicionar download
+    let show_add_dialog = {
+        let list_box_clone = list_box.clone();
+        let content_stack_clone = content_stack.clone();
+        let state_clone = state.clone();
+        let window_clone = window.clone();
 
-    download_btn.connect_clicked(move |_| {
-        let url = url_entry_clone.text().to_string();
-        if !url.is_empty() {
-            add_download(&list_box_clone, &url, &state_clone);
-            content_stack_clone.set_visible_child_name("list");
-            url_entry_clone.set_text("");
+        move || {
+            // Cria a modal
+            let dialog = MessageDialog::builder()
+                .transient_for(&window_clone)
+                .heading("Adicionar Download")
+                .body("Cole o link do arquivo que você deseja baixar:")
+                .build();
+
+            // Adiciona botões de ação
+            dialog.add_response("cancel", "Cancelar");
+            dialog.add_response("download", "Baixar");
+            dialog.set_response_appearance("download", ResponseAppearance::Suggested);
+            dialog.set_default_response(Some("download"));
+            dialog.set_close_response("cancel");
+
+            // Campo de entrada de URL dentro da modal
+            let url_entry = Entry::builder()
+                .placeholder_text("https://exemplo.com/arquivo.zip")
+                .activates_default(true)
+                .build();
+
+            // Container para o entry com margens adequadas
+            let entry_box = GtkBox::builder()
+                .orientation(Orientation::Vertical)
+                .spacing(12)
+                .margin_top(12)
+                .margin_bottom(12)
+                .margin_start(12)
+                .margin_end(12)
+                .build();
+
+            entry_box.append(&url_entry);
+            dialog.set_extra_child(Some(&entry_box));
+
+            // Clones necessários para o callback
+            let list_box_dialog = list_box_clone.clone();
+            let content_stack_dialog = content_stack_clone.clone();
+            let state_dialog = state_clone.clone();
+
+            // Conecta resposta da modal
+            dialog.connect_response(None, move |dialog, response| {
+                if response == "download" {
+                    let url = url_entry.text().to_string();
+                    if !url.is_empty() {
+                        add_download(&list_box_dialog, &url, &state_dialog);
+                        content_stack_dialog.set_visible_child_name("list");
+                    }
+                }
+                dialog.close();
+            });
+
+            dialog.present();
         }
+    };
+
+    // Cria ação para adicionar download (permite atalho de teclado)
+    let add_action = gio::SimpleAction::new("add-download", None);
+    let show_add_dialog_action = show_add_dialog.clone();
+    add_action.connect_activate(move |_, _| {
+        show_add_dialog_action();
+    });
+    window.add_action(&add_action);
+
+    // Adiciona atalho de teclado Ctrl+N
+    app.set_accels_for_action("win.add-download", &["<Ctrl>N"]);
+
+    // Conecta botão do header
+    let show_add_dialog_header = show_add_dialog.clone();
+    add_download_btn.connect_clicked(move |_| {
+        show_add_dialog_header();
     });
 
-    let download_btn_clone = download_btn.clone();
-    url_entry.connect_activate(move |_| {
-        download_btn_clone.emit_clicked();
+    // Conecta botão do empty state
+    empty_add_btn.connect_clicked(move |_| {
+        show_add_dialog();
     });
 
     window.set_content(Some(&main_box));
