@@ -1,0 +1,17 @@
+
+[package]
+name = "downstream"
+version = "1.0.0"
+edition = "2021"
+authors = ["Your Name"]
+description = "Gerenciador minimalista de downloads com GTK4 e aria2c"
+
+[dependencies]
+gtk4 = { version = "0.7", features = ["v4_6"] }
+libadwaita = { version = "0.5", features = ["v1_2"] }
+dirs = "5.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
