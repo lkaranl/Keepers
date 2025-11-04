@@ -96,8 +96,23 @@ fn load_downloads() -> Vec<DownloadRecord> {
 fn save_downloads(records: &[DownloadRecord]) {
     let file_path = get_data_file_path();
 
-    if let Ok(json) = serde_json::to_string_pretty(records) {
-        let _ = std::fs::write(&file_path, json);
+    match serde_json::to_string_pretty(records) {
+        Ok(json) => {
+            // Tenta escrever o arquivo, criando um arquivo temporário primeiro para garantir atomicidade
+            let temp_path = file_path.with_extension("json.tmp");
+            if let Err(e) = std::fs::write(&temp_path, json) {
+                eprintln!("Erro ao escrever arquivo temporário: {}", e);
+                return;
+            }
+            // Renomeia o arquivo temporário para o arquivo final (operação atômica)
+            if let Err(e) = std::fs::rename(&temp_path, &file_path) {
+                eprintln!("Erro ao renomear arquivo: {}", e);
+                let _ = std::fs::remove_file(&temp_path);
+            }
+        }
+        Err(e) => {
+            eprintln!("Erro ao serializar downloads: {}", e);
+        }
     }
 }
 
@@ -189,7 +204,7 @@ fn build_ui(app: &Application) {
             if record.status == DownloadStatus::InProgress && !record.was_paused {
                 to_resume.push(record.url.clone());
             } else {
-                // Caso contrário, mostra como download completo/pausado/falhado
+                // Caso contrário, mostra como download completo/pausado/falhado/cancelado
                 add_completed_download(&list_box, &record, &state);
             }
         }
@@ -245,6 +260,13 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .margin_end(16)
         .build();
 
+    // Se estiver cancelado, aplica estilo especial (opaco)
+    let is_cancelled = record.status == DownloadStatus::Cancelled;
+    if is_cancelled {
+        row_box.add_css_class("cancelled-download");
+        row_box.set_opacity(0.5);
+    }
+
     // Header com título
     let title_label = Label::builder()
         .label(&record.filename)
@@ -253,6 +275,11 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .css_classes(vec!["title-3"])
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .build();
+
+    // Se cancelado, adiciona risco no meio do texto usando Pango markup
+    if is_cancelled {
+        title_label.set_markup(&format!("<s>{}</s>", glib::markup_escape_text(&record.filename)));
+    }
 
     // Barra de progresso
     let (fraction, text) = if record.status == DownloadStatus::InProgress && record.total_bytes > 0 {
@@ -270,6 +297,11 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .fraction(fraction)
         .text(&text)
         .build();
+
+    // Se cancelado, aplica estilo especial na barra de progresso
+    if is_cancelled {
+        progress_bar.add_css_class("cancelled-progress");
+    }
 
     // Box de status
     let info_box = GtkBox::builder()
@@ -380,26 +412,36 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
 
     let row_box_clone = row_box.clone();
     let record_url = record.url.clone();
-    let state_records_delete = if let Ok(st) = state.lock() {
-        st.records.clone()
-    } else {
-        Arc::new(Mutex::new(Vec::new()))
-    };
+    let state_clone = state.clone();
 
     delete_btn.connect_clicked(move |_| {
-        // Remove da UI
-        if let Some(parent) = row_box_clone.parent() {
-            if let Some(grandparent) = parent.parent() {
-                if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
-                    list_box.remove(&parent);
+        // Remove do state.records e do arquivo de dados PRIMEIRO
+        let mut should_remove_ui = true;
+        if let Ok(app_state) = state_clone.lock() {
+            if let Ok(mut records) = app_state.records.lock() {
+                let before_count = records.len();
+                records.retain(|r| r.url != record_url);
+                let after_count = records.len();
+                
+                if before_count != after_count {
+                    // Salvou com sucesso, agora remove da UI
+                    save_downloads(&records);
+                } else {
+                    // Não encontrou o registro, pode já ter sido removido
+                    should_remove_ui = false;
                 }
             }
         }
-
-        // Remove do state.records e do arquivo de dados
-        if let Ok(mut records) = state_records_delete.lock() {
-            records.retain(|r| r.url != record_url);
-            save_downloads(&records);
+        
+        // Remove da UI
+        if should_remove_ui {
+            if let Some(parent) = row_box_clone.parent() {
+                if let Some(grandparent) = parent.parent() {
+                    if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
+                        list_box.remove(&parent);
+                    }
+                }
+            }
         }
     });
 
@@ -748,50 +790,88 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Handler para botão de cancelar
     let download_task_clone = download_task.clone();
     let row_box_clone_cancel = row_box.clone();
-    let state_records_clone2 = state_records.clone();
+    let state_clone_cancel = state.clone();
     let record_url_clone2 = record_url.clone();
+    let title_label_clone_cancel = title_label.clone();
+    let progress_bar_clone_cancel = progress_bar.clone();
+    let status_label_clone_cancel = status_label.clone();
+    let speed_label_clone_cancel = speed_label.clone();
+    let eta_label_clone_cancel = eta_label.clone();
+    let pause_btn_clone_cancel = pause_btn.clone();
+    let cancel_btn_clone_cancel = cancel_btn.clone();
+    let delete_btn_clone_cancel = delete_btn.clone();
+    let filename_clone_cancel = filename.clone();
 
     cancel_btn.connect_clicked(move |_| {
+        // Cancela o download
         if let Ok(mut task) = download_task_clone.lock() {
             task.cancelled = true;
         }
 
-        // Marca registro como cancelado
-        if let Ok(mut records) = state_records_clone2.lock() {
-            if let Some(record) = records.iter_mut().find(|r| r.url == record_url_clone2) {
-                record.status = DownloadStatus::Cancelled;
-                record.date_completed = Some(Utc::now());
+        // Marca como cancelado no registro (mantém os metadados)
+        if let Ok(app_state) = state_clone_cancel.lock() {
+            if let Ok(mut records) = app_state.records.lock() {
+                if let Some(record) = records.iter_mut().find(|r| r.url == record_url_clone2) {
+                    record.status = DownloadStatus::Cancelled;
+                    record.date_completed = Some(Utc::now());
+                }
+                save_downloads(&records);
             }
-            save_downloads(&records);
         }
 
-        // Remove a ListBoxRow parent
-        if let Some(parent) = row_box_clone_cancel.parent() {
-            if let Some(grandparent) = parent.parent() {
-                if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
-                    list_box.remove(&parent);
-                }
-            }
-        }
+        // Atualiza a UI para mostrar como cancelado (não remove da tela)
+        // Aplica opacidade no container
+        row_box_clone_cancel.add_css_class("cancelled-download");
+        row_box_clone_cancel.set_opacity(0.5);
+
+        // Adiciona risco no texto do título
+        title_label_clone_cancel.set_markup(&format!("<s>{}</s>", glib::markup_escape_text(&filename_clone_cancel)));
+
+        // Atualiza barra de progresso
+        progress_bar_clone_cancel.add_css_class("cancelled-progress");
+
+        // Atualiza status
+        status_label_clone_cancel.set_text("Cancelado");
+        speed_label_clone_cancel.set_text("");
+        eta_label_clone_cancel.set_text("");
+
+        // Esconde botões de controle e mostra botão de excluir
+        pause_btn_clone_cancel.set_visible(false);
+        cancel_btn_clone_cancel.set_visible(false);
+        delete_btn_clone_cancel.set_visible(true);
     });
 
     // Handler para botão de excluir
     let row_box_clone_delete = row_box.clone();
-    let state_records_clone3 = state_records.clone();
+    let state_clone_delete = state.clone();
     let record_url_clone3 = record_url.clone();
 
     delete_btn.connect_clicked(move |_| {
-        // Remove do state.records
-        if let Ok(mut records) = state_records_clone3.lock() {
-            records.retain(|r| r.url != record_url_clone3);
-            save_downloads(&records);
+        // Remove do state.records e salva no arquivo PRIMEIRO
+        let mut should_remove_ui = true;
+        if let Ok(app_state) = state_clone_delete.lock() {
+            if let Ok(mut records) = app_state.records.lock() {
+                let before_count = records.len();
+                records.retain(|r| r.url != record_url_clone3);
+                let after_count = records.len();
+                
+                if before_count != after_count {
+                    // Salvou com sucesso, agora remove da UI
+                    save_downloads(&records);
+                } else {
+                    // Não encontrou o registro, pode já ter sido removido
+                    should_remove_ui = false;
+                }
+            }
         }
-
-        // Remove a ListBoxRow parent
-        if let Some(parent) = row_box_clone_delete.parent() {
-            if let Some(grandparent) = parent.parent() {
-                if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
-                    list_box.remove(&parent);
+        
+        // Remove da UI
+        if should_remove_ui {
+            if let Some(parent) = row_box_clone_delete.parent() {
+                if let Some(grandparent) = parent.parent() {
+                    if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
+                        list_box.remove(&parent);
+                    }
                 }
             }
         }
