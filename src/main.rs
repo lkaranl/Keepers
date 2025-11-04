@@ -15,7 +15,7 @@ const APP_ID: &str = "com.downstream.app";
 
 #[derive(Clone, Debug)]
 enum DownloadMessage {
-    Progress(f64, String, String), // (progress, status_text, speed)
+    Progress(f64, String, String, String), // (progress, status_text, speed, eta)
     Complete,
     Error(String),
 }
@@ -450,14 +450,29 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .css_classes(vec!["caption", "dim-label"])
         .build();
 
+    let speed_eta_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .halign(gtk4::Align::End)
+        .build();
+
     let speed_label = Label::builder()
         .label("")
         .halign(gtk4::Align::End)
         .css_classes(vec!["caption"])
         .build();
 
+    let eta_label = Label::builder()
+        .label("")
+        .halign(gtk4::Align::End)
+        .css_classes(vec!["caption", "dim-label"])
+        .build();
+
+    speed_eta_box.append(&speed_label);
+    speed_eta_box.append(&eta_label);
+
     info_box.append(&status_label);
-    info_box.append(&speed_label);
+    info_box.append(&speed_eta_box);
 
     // Box de botões de ação
     let buttons_box = GtkBox::builder()
@@ -562,6 +577,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let progress_bar_clone = progress_bar.clone();
     let status_label_clone = status_label.clone();
     let speed_label_clone = speed_label.clone();
+    let eta_label_clone = eta_label.clone();
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
     let open_btn_clone = open_btn.clone();
@@ -575,11 +591,12 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
         while let Ok(msg) = msg_rx.recv().await {
             match msg {
-                DownloadMessage::Progress(progress, status_text, speed) => {
+                DownloadMessage::Progress(progress, status_text, speed, eta) => {
                     progress_bar_clone.set_fraction(progress);
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
                     status_label_clone.set_text(&status_text);
                     speed_label_clone.set_text(&speed);
+                    eta_label_clone.set_text(&eta);
 
                     // Atualiza registro a cada 5 segundos
                     if last_save.elapsed().as_secs() >= 5 {
@@ -604,6 +621,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     progress_bar_clone.set_text(Some("100%"));
                     status_label_clone.set_text("Concluído");
                     speed_label_clone.set_text("✓");
+                    eta_label_clone.set_text("");
 
                     // Esconde botões de controle e mostra botões de arquivo completo
                     pause_btn_clone.set_visible(false);
@@ -633,6 +651,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 DownloadMessage::Error(err) => {
                     status_label_clone.set_text(&format!("Erro: {}", err));
                     speed_label_clone.set_text("");
+                    eta_label_clone.set_text("");
                     pause_btn_clone.set_visible(false);
                     cancel_btn_clone.set_visible(false);
                     delete_btn_clone.set_visible(true);
@@ -895,9 +914,18 @@ fn start_download(
                     let speed_bytes = (downloaded - last_downloaded) as f64 / last_update.elapsed().as_secs_f64();
                     let speed_text = format_speed(speed_bytes);
 
+                    // Calcula ETA (tempo restante estimado)
+                    let eta_text = if total_size > 0 && speed_bytes > 0.0 {
+                        let remaining_bytes = total_size - downloaded;
+                        let eta_seconds = remaining_bytes as f64 / speed_bytes;
+                        format_eta(eta_seconds)
+                    } else {
+                        String::new()
+                    };
+
                     let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
 
-                    let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text)).await;
+                    let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text, eta_text)).await;
 
                     last_update = Instant::now();
                     last_downloaded = downloaded;
@@ -947,5 +975,27 @@ fn format_speed(bytes_per_sec: f64) -> String {
         format!("{:.2} KB/s", bytes_per_sec / KB)
     } else {
         format!("{:.0} B/s", bytes_per_sec)
+    }
+}
+
+fn format_eta(seconds: f64) -> String {
+    if seconds.is_infinite() || seconds.is_nan() || seconds < 0.0 {
+        return String::new();
+    }
+
+    let total_seconds = seconds as u64;
+
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let secs = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{}h {}min", hours, minutes)
+    } else if minutes > 0 {
+        format!("{}min {}s", minutes, secs)
+    } else if secs > 0 {
+        format!("{}s", secs)
+    } else {
+        "< 1s".to_string()
     }
 }
