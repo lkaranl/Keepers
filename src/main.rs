@@ -338,6 +338,20 @@ fn build_ui(app: &Application) {
             entry_box.append(&url_entry);
             dialog.set_extra_child(Some(&entry_box));
 
+            // Desabilita botão "Baixar" inicialmente se o campo estiver vazio
+            let dialog_clone = dialog.clone();
+            url_entry.connect_changed(move |entry| {
+                let url = entry.text().to_string().trim().to_string();
+                // Remove classe de erro quando usuário começar a digitar
+                entry.remove_css_class("error");
+                // Valida se tem conteúdo e começa com http:// ou https://
+                let is_valid = !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://"));
+                dialog_clone.set_response_enabled("download", is_valid);
+            });
+
+            // Desabilita inicialmente o botão "Baixar"
+            dialog.set_response_enabled("download", false);
+
             // Clones necessários para o callback
             let list_box_dialog = list_box_clone.clone();
             let content_stack_dialog = content_stack_clone.clone();
@@ -346,13 +360,19 @@ fn build_ui(app: &Application) {
             // Conecta resposta da modal
             dialog.connect_response(None, move |dialog, response| {
                 if response == "download" {
-                    let url = url_entry.text().to_string();
-                    if !url.is_empty() {
+                    let url = url_entry.text().to_string().trim().to_string();
+                    // Valida se tem conteúdo e começa com http:// ou https://
+                    if !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://")) {
                         add_download(&list_box_dialog, &url, &state_dialog);
                         content_stack_dialog.set_visible_child_name("list");
+                        dialog.close();
+                    } else {
+                        // Se não for válido, não fecha a modal e mostra feedback visual
+                        url_entry.add_css_class("error");
                     }
+                } else {
+                    dialog.close();
                 }
-                dialog.close();
             });
 
             dialog.present();
