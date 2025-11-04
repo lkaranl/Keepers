@@ -386,6 +386,57 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         buttons_box.append(&resume_btn);
     }
 
+    // Botão de reiniciar (apenas para downloads cancelados)
+    if record.status == DownloadStatus::Cancelled {
+        let restart_btn = Button::builder()
+            .icon_name("view-refresh-symbolic")
+            .tooltip_text("Reiniciar download do zero")
+            .css_classes(vec!["suggested-action"])
+            .build();
+
+        let record_url = record.url.clone();
+        let record_filename = record.filename.clone();
+        let row_box_clone = row_box.clone();
+        let list_box_clone = list_box.clone();
+        let state_clone = state.clone();
+        let state_records = if let Ok(st) = state.lock() {
+            st.records.clone()
+        } else {
+            Arc::new(Mutex::new(Vec::new()))
+        };
+
+        restart_btn.connect_clicked(move |_| {
+            // Remove da UI
+            if let Some(parent) = row_box_clone.parent() {
+                if let Some(grandparent) = parent.parent() {
+                    if let Some(lb) = grandparent.downcast_ref::<ListBox>() {
+                        lb.remove(&parent);
+                    }
+                }
+            }
+
+            // Remove do state.records e do JSON
+            if let Ok(mut records) = state_records.lock() {
+                records.retain(|r| r.url != record_url);
+                save_downloads(&records);
+            }
+
+            // Remove arquivo parcial se existir (para começar do zero)
+            let download_dir = std::env::current_dir().unwrap_or_else(|_| {
+                dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
+            });
+            let temp_path = download_dir.join(format!("{}.part", record_filename));
+            if temp_path.exists() {
+                let _ = std::fs::remove_file(&temp_path);
+            }
+
+            // Inicia novo download do zero
+            add_download(&list_box_clone, &record_url, &state_clone);
+        });
+
+        buttons_box.append(&restart_btn);
+    }
+
     // Botão de abrir (apenas para completados)
     if record.status == DownloadStatus::Completed {
         let open_btn = Button::builder()
@@ -800,6 +851,8 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let pause_btn_clone_cancel = pause_btn.clone();
     let cancel_btn_clone_cancel = cancel_btn.clone();
     let delete_btn_clone_cancel = delete_btn.clone();
+    let buttons_box_clone_cancel = buttons_box.clone();
+    let list_box_clone_cancel = list_box.clone();
     let filename_clone_cancel = filename.clone();
 
     cancel_btn.connect_clicked(move |_| {
@@ -835,10 +888,55 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         speed_label_clone_cancel.set_text("");
         eta_label_clone_cancel.set_text("");
 
-        // Esconde botões de controle e mostra botão de excluir
+        // Adiciona botão de reiniciar
+        let restart_btn = Button::builder()
+            .icon_name("view-refresh-symbolic")
+            .tooltip_text("Reiniciar download do zero")
+            .css_classes(vec!["suggested-action"])
+            .build();
+
+        let record_url_clone_restart = record_url_clone2.clone();
+        let row_box_clone_restart = row_box_clone_cancel.clone();
+        let list_box_clone_restart = list_box_clone_cancel.clone();
+        let state_clone_restart = state_clone_cancel.clone();
+        let filename_clone_restart = filename_clone_cancel.clone();
+
+        restart_btn.connect_clicked(move |_| {
+            // Remove da UI
+            if let Some(parent) = row_box_clone_restart.parent() {
+                if let Some(grandparent) = parent.parent() {
+                    if let Some(lb) = grandparent.downcast_ref::<ListBox>() {
+                        lb.remove(&parent);
+                    }
+                }
+            }
+
+            // Remove do state.records e do JSON
+            if let Ok(app_state) = state_clone_restart.lock() {
+                if let Ok(mut records) = app_state.records.lock() {
+                    records.retain(|r| r.url != record_url_clone_restart);
+                    save_downloads(&records);
+                }
+            }
+
+            // Remove arquivo parcial se existir (para começar do zero)
+            let download_dir = std::env::current_dir().unwrap_or_else(|_| {
+                dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
+            });
+            let temp_path = download_dir.join(format!("{}.part", filename_clone_restart));
+            if temp_path.exists() {
+                let _ = std::fs::remove_file(&temp_path);
+            }
+
+            // Inicia novo download do zero
+            add_download(&list_box_clone_restart, &record_url_clone_restart, &state_clone_restart);
+        });
+
+        // Esconde botões de controle e mostra botão de reiniciar e excluir
         pause_btn_clone_cancel.set_visible(false);
         cancel_btn_clone_cancel.set_visible(false);
         delete_btn_clone_cancel.set_visible(true);
+        buttons_box_clone_cancel.prepend(&restart_btn);
     });
 
     // Handler para botão de excluir
