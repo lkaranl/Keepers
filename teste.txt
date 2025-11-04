@@ -13,7 +13,7 @@ Adicionar sombras sutis nos cards — usar CSS para elevação nos itens de down
 Visual e hierarquia:
 Ícones de status mais visíveis — usar ícones coloridos (verde=completo, vermelho=erro, amarelo=pausado) - v 
 Melhorar tipografia — usar diferentes tamanhos/pesos para título, status e metadados - v
-Adicionar badges visuais — badges coloridos para status (completo, pausado, erro) - 
+Adicionar badges visuais — badges coloridos para status (completo, pausado, erro) - v
 
 Layout responsivo:
 Redimensionamento inteligente — ajustar layout quando a janela for redimensionada
@@ -27,6 +27,6 @@ Agrupar informações — agrupar data e status em uma área visual
 
 Organização de informações:
 Layout em grid — mostrar informações em colunas (nome, tamanho, data, status)
-Indicador de tamanho do arquivo — mostrar tamanho total do arquivo no card
+Indicador de tamanho do arquivo — mostrar tamanho total do arquivo no card - v
 Melhorar barra de progresso — adicionar cores diferentes por status (azul=ativo, verde=completo)
 Lista focada em melhorias visuais e de layout.
