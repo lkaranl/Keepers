@@ -116,6 +116,26 @@ fn load_downloads() -> Vec<DownloadRecord> {
     }
 }
 
+fn format_file_size(bytes: u64) -> String {
+    if bytes == 0 {
+        return "Desconhecido".to_string();
+    }
+    
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 fn save_downloads(records: &[DownloadRecord]) {
     let file_path = get_data_file_path();
 
@@ -495,6 +515,29 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     status_badge.append(&status_label);
     status_box.append(&status_badge);
 
+    // Box para metadados (tamanho e data)
+    let metadata_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .halign(gtk4::Align::End)
+        .build();
+
+    // Label para tamanho do arquivo
+    let size_label = Label::builder()
+        .halign(gtk4::Align::End)
+        .css_classes(vec!["caption"])
+        .build();
+    
+    let size_text = if record.total_bytes > 0 {
+        format_file_size(record.total_bytes)
+    } else {
+        "Desconhecido".to_string()
+    };
+    size_label.set_markup(&format!(
+        "<span weight='600' size='small'>{}</span>",
+        glib::markup_escape_text(&size_text)
+    ));
+
     let date_label = Label::builder()
         .halign(gtk4::Align::End)
         .css_classes(vec!["caption", "dim-label"])
@@ -507,8 +550,11 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         glib::markup_escape_text(&date_text)
     ));
 
+    metadata_box.append(&size_label);
+    metadata_box.append(&date_label);
+
     info_box.append(&status_box);
-    info_box.append(&date_label);
+    info_box.append(&metadata_box);
 
     // Box de botões
     let buttons_box = GtkBox::builder()
@@ -802,6 +848,21 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     status_badge.append(&status_label);
     status_box.append(&status_badge);
 
+    // Box para metadados (tamanho, velocidade e ETA)
+    let metadata_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .halign(gtk4::Align::End)
+        .build();
+
+    // Label para tamanho do arquivo (inicialmente vazio, será atualizado quando disponível)
+    let size_label = Label::builder()
+        .halign(gtk4::Align::End)
+        .css_classes(vec!["caption"])
+        .build();
+    
+    size_label.set_markup("<span weight='600' size='small'></span>");
+
     let speed_eta_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(4)
@@ -827,8 +888,11 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     speed_eta_box.append(&speed_label);
     speed_eta_box.append(&eta_label);
 
+    metadata_box.append(&size_label);
+    metadata_box.append(&speed_eta_box);
+
     info_box.append(&status_box);
-    info_box.append(&speed_eta_box);
+    info_box.append(&metadata_box);
 
     // Box de botões de ação
     let buttons_box = GtkBox::builder()
@@ -945,13 +1009,14 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let (msg_tx, msg_rx) = async_channel::unbounded();
 
     // Inicia o download em thread separada
-    start_download(url, &filename, msg_tx, download_task.clone());
+    start_download(url, &filename, msg_tx, download_task.clone(), state_records.clone());
 
     // Monitora mensagens na thread principal do GTK usando spawn_future_local
     let progress_bar_clone = progress_bar.clone();
     let status_badge_clone = status_badge.clone();
     let status_icon_label_clone = status_icon_label.clone();
     let status_label_clone = status_label.clone();
+    let size_label_clone = size_label.clone();
     let speed_label_clone = speed_label.clone();
     let eta_label_clone = eta_label.clone();
     let parallel_tag_clone = parallel_tag.clone();
@@ -972,6 +1037,19 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 DownloadMessage::Progress(progress, status_text, speed, eta, parallel_chunks) => {
                     progress_bar_clone.set_fraction(progress);
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
+                    
+                    // Atualiza tamanho do arquivo se disponível no registro
+                    if let Ok(mut records) = state_records_clone.lock() {
+                        if let Some(record) = records.iter().find(|r| r.url == record_url_clone) {
+                            if record.total_bytes > 0 {
+                                let size_text = format_file_size(record.total_bytes);
+                                size_label_clone.set_markup(&format!(
+                                    "<span weight='600' size='small'>{}</span>",
+                                    glib::markup_escape_text(&size_text)
+                                ));
+                            }
+                        }
+                    }
                     
                     // Atualiza ícone de status e badge baseado no status_text
                     let (icon, badge_class) = if status_text.contains("Pausado") || status_text.contains("Pausar") {
@@ -1325,6 +1403,7 @@ fn start_download(
     filename: &str,
     tx: async_channel::Sender<DownloadMessage>,
     download_task: Arc<Mutex<DownloadTask>>,
+    state_records: Arc<Mutex<Vec<DownloadRecord>>>,
 ) {
     let url = url.to_string();
     let filename = filename.to_string();
@@ -1375,6 +1454,16 @@ fn start_download(
                     return;
                 }
             };
+
+            // Atualiza total_bytes no registro quando disponível
+            if total_size > 0 {
+                if let Ok(mut records) = state_records.lock() {
+                    if let Some(record) = records.iter_mut().find(|r| r.url == url) {
+                        record.total_bytes = total_size;
+                        save_downloads(&records);
+                    }
+                }
+            }
 
             // Se não suporta Range ou tamanho desconhecido, usa download sequencial
             if !supports_range || total_size == 0 || total_size < 1024 * 1024 {
