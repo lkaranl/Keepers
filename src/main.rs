@@ -362,25 +362,61 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .spacing(16)
         .build();
 
-    let status_text = match record.status {
+    // Box para status com ícone e texto
+    let status_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .halign(gtk4::Align::Start)
+        .hexpand(true)
+        .build();
+
+    let (status_text, status_icon) = match record.status {
         DownloadStatus::InProgress => {
             if record.was_paused {
-                "Pausado"
+                ("Pausado", "⏸")
             } else {
-                "Retomando..."
+                ("Em progresso", "⬇")
             }
         }
-        DownloadStatus::Completed => "Concluído",
-        DownloadStatus::Failed => "Falhou",
-        DownloadStatus::Cancelled => "Cancelado",
+        DownloadStatus::Completed => ("Concluído", "✓"),
+        DownloadStatus::Failed => ("Falhou", "✕"),
+        DownloadStatus::Cancelled => ("Cancelado", "⊘"),
     };
+
+    // Ícone de status com cor
+    let status_icon_label = Label::builder()
+        .label(status_icon)
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption"])
+        .build();
+
+    // Aplica cor ao ícone usando Pango markup
+    let icon_color = match record.status {
+        DownloadStatus::InProgress => {
+            if record.was_paused {
+                "#fbbf24" // amarelo
+            } else {
+                "#3b82f6" // azul
+            }
+        }
+        DownloadStatus::Completed => "#10b981", // verde
+        DownloadStatus::Failed => "#ef4444",    // vermelho
+        DownloadStatus::Cancelled => "#6b7280",  // cinza
+    };
+
+    status_icon_label.set_markup(&format!(
+        "<span foreground='{}' size='large' weight='bold'>{}</span>",
+        icon_color, status_icon
+    ));
 
     let status_label = Label::builder()
         .label(status_text)
         .halign(gtk4::Align::Start)
-        .hexpand(true)
-        .css_classes(vec!["caption", "dim-label"])
+        .css_classes(vec!["caption"])
         .build();
+
+    status_box.append(&status_icon_label);
+    status_box.append(&status_label);
 
     let date_label = Label::builder()
         .label(&format!("{}", record.date_added.format("%d/%m/%Y %H:%M")))
@@ -388,7 +424,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .css_classes(vec!["caption", "dim-label"])
         .build();
 
-    info_box.append(&status_label);
+    info_box.append(&status_box);
     info_box.append(&date_label);
 
     // Box de botões
@@ -642,12 +678,31 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .spacing(16)
         .build();
 
+    // Box para status com ícone e texto
+    let status_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .halign(gtk4::Align::Start)
+        .hexpand(true)
+        .build();
+
+    // Ícone de status (inicialmente azul para "em progresso")
+    let status_icon_label = Label::builder()
+        .label("⬇")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption"])
+        .build();
+    
+    status_icon_label.set_markup("<span foreground='#3b82f6' size='large' weight='bold'>⬇</span>");
+
     let status_label = Label::builder()
         .label("Iniciando...")
         .halign(gtk4::Align::Start)
-        .hexpand(true)
-        .css_classes(vec!["caption", "dim-label"])
+        .css_classes(vec!["caption"])
         .build();
+
+    status_box.append(&status_icon_label);
+    status_box.append(&status_label);
 
     let speed_eta_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -670,7 +725,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     speed_eta_box.append(&speed_label);
     speed_eta_box.append(&eta_label);
 
-    info_box.append(&status_label);
+    info_box.append(&status_box);
     info_box.append(&speed_eta_box);
 
     // Box de botões de ação
@@ -792,6 +847,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
     // Monitora mensagens na thread principal do GTK usando spawn_future_local
     let progress_bar_clone = progress_bar.clone();
+    let status_icon_label_clone = status_icon_label.clone();
     let status_label_clone = status_label.clone();
     let speed_label_clone = speed_label.clone();
     let eta_label_clone = eta_label.clone();
@@ -813,6 +869,20 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 DownloadMessage::Progress(progress, status_text, speed, eta, parallel_chunks) => {
                     progress_bar_clone.set_fraction(progress);
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
+                    
+                    // Atualiza ícone de status baseado no status_text
+                    let (icon, color) = if status_text.contains("Pausado") || status_text.contains("Pausar") {
+                        ("⏸", "#fbbf24") // amarelo
+                    } else if status_text.contains("Erro") || status_text.contains("Falha") {
+                        ("✕", "#ef4444") // vermelho
+                    } else {
+                        ("⬇", "#3b82f6") // azul (em progresso)
+                    };
+                    
+                    status_icon_label_clone.set_markup(&format!(
+                        "<span foreground='{}' size='large' weight='bold'>{}</span>",
+                        color, icon
+                    ));
                     status_label_clone.set_text(&status_text);
                     speed_label_clone.set_text(&speed);
                     eta_label_clone.set_text(&eta);
@@ -839,6 +909,9 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 DownloadMessage::Complete => {
                     progress_bar_clone.set_fraction(1.0);
                     progress_bar_clone.set_text(Some("100%"));
+                    
+                    // Ícone verde para completo
+                    status_icon_label_clone.set_markup("<span foreground='#10b981' size='large' weight='bold'>✓</span>");
                     status_label_clone.set_text("Concluído");
                     speed_label_clone.set_text("✓");
                     eta_label_clone.set_text("");
@@ -870,6 +943,17 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     break;
                 }
                 DownloadMessage::Error(err) => {
+                    // Atualiza ícone de status baseado no tipo de erro
+                    let (icon, color, status) = if err.contains("Cancelado") {
+                        ("⊘", "#6b7280", DownloadStatus::Cancelled) // cinza
+                    } else {
+                        ("✕", "#ef4444", DownloadStatus::Failed) // vermelho
+                    };
+                    
+                    status_icon_label_clone.set_markup(&format!(
+                        "<span foreground='{}' size='large' weight='bold'>{}</span>",
+                        color, icon
+                    ));
                     status_label_clone.set_text(&format!("Erro: {}", err));
                     speed_label_clone.set_text("");
                     eta_label_clone.set_text("");
@@ -878,11 +962,6 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     delete_btn_clone.set_visible(true);
 
                     // Atualiza registro de erro
-                    let status = if err.contains("Cancelado") {
-                        DownloadStatus::Cancelled
-                    } else {
-                        DownloadStatus::Failed
-                    };
 
                     if let Ok(mut records) = state_records_clone.lock() {
                         if let Some(record) = records.iter_mut().find(|r| r.url == record_url_clone) {
