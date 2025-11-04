@@ -1,5 +1,6 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu};
 use gtk4::glib;
+use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager};
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
@@ -61,6 +62,26 @@ fn main() {
     let app = Application::builder()
         .application_id(APP_ID)
         .build();
+
+    // Cria ações globais para o menu
+    let show_action = gio::SimpleAction::new("show", None);
+    let quit_action = gio::SimpleAction::new("quit", None);
+    
+    let app_clone = app.clone();
+    show_action.connect_activate(move |_, _| {
+        if let Some(window) = app_clone.active_window() {
+            window.present();
+            window.set_visible(true);
+        }
+    });
+    
+    let app_clone = app.clone();
+    quit_action.connect_activate(move |_, _| {
+        app_clone.quit();
+    });
+    
+    app.add_action(&show_action);
+    app.add_action(&quit_action);
 
     app.connect_activate(build_ui);
     app.run();
@@ -135,9 +156,26 @@ fn build_ui(app: &Application) {
         .default_height(500)
         .build();
 
+
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
     let header = HeaderBar::new();
+    
+    // Adiciona menu button no header para system tray
+    let menu_button = MenuButton::builder()
+        .icon_name("folder-download-symbolic")
+        .tooltip_text("Menu do DownStream")
+        .build();
+    
+    let menu = gio::Menu::new();
+    menu.append(Some("Mostrar Janela"), Some("app.show"));
+    menu.append(Some("Sair"), Some("app.quit"));
+    
+    let popover = PopoverMenu::from_model(Some(&menu));
+    menu_button.set_popover(Some(&popover));
+    
+    header.pack_start(&menu_button);
+    
     main_box.append(&header);
 
     let input_box = GtkBox::builder()
@@ -247,7 +285,20 @@ fn build_ui(app: &Application) {
     });
 
     window.set_content(Some(&main_box));
+    
+    // Configura para não fechar completamente quando clicar no X (minimiza para tray)
+    window.connect_close_request(move |window| {
+        window.set_visible(false);
+        glib::Propagation::Stop
+    });
+    
     window.present();
+    
+    // Nota: Esta implementação adiciona um menu no header
+    // Para um verdadeiro system tray icon no Linux, você precisaria:
+    // 1. Adicionar dependência libappindicator (via bindings Rust)
+    // 2. Ou usar uma biblioteca como tray-item
+    // Por enquanto, o menu no header funciona como alternativa
 }
 
 fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &Arc<Mutex<AppState>>) {
