@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider, StyleContext};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager};
@@ -347,7 +347,7 @@ fn build_ui(app: &Application) {
     
     // Adiciona o provider CSS ao display
     if let Some(display) = gtk4::gdk::Display::default() {
-        StyleContext::add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk4::style_context_add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
     
     // Configura para não fechar completamente quando clicar no X (minimiza para tray)
@@ -480,20 +480,6 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .halign(gtk4::Align::Start)
         .css_classes(vec!["caption"])
         .build();
-
-    // Aplica cor ao ícone usando Pango markup
-    let icon_color = match record.status {
-        DownloadStatus::InProgress => {
-            if record.was_paused {
-                "#fbbf24" // amarelo
-            } else {
-                "#3b82f6" // azul
-            }
-        }
-        DownloadStatus::Completed => "#10b981", // verde
-        DownloadStatus::Failed => "#ef4444",    // vermelho
-        DownloadStatus::Cancelled => "#6b7280",  // cinza
-    };
 
     status_icon_label.set_markup(&format!(
         "<span size='large' weight='bold'>{}</span>",
@@ -1039,7 +1025,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
                     
                     // Atualiza tamanho do arquivo se disponível no registro
-                    if let Ok(mut records) = state_records_clone.lock() {
+                    if let Ok(records) = state_records_clone.lock() {
                         if let Some(record) = records.iter().find(|r| r.url == record_url_clone) {
                             if record.total_bytes > 0 {
                                 let size_text = format_file_size(record.total_bytes);
@@ -1228,6 +1214,9 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let download_task_clone = download_task.clone();
     let state_records_clone4 = state_records.clone();
     let record_url_clone4 = record_url.clone();
+    let status_badge_clone_pause = status_badge.clone();
+    let status_icon_label_clone_pause = status_icon_label.clone();
+    let status_label_clone_pause = status_label.clone();
 
     pause_btn.connect_clicked(move |btn| {
         if let Ok(mut task) = download_task_clone.lock() {
@@ -1237,9 +1226,23 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
             if is_paused {
                 btn.set_icon_name("media-playback-start-symbolic");
                 btn.set_tooltip_text(Some("Retomar"));
+                
+                // Atualiza UI para pausado
+                status_badge_clone_pause.remove_css_class("in-progress");
+                status_badge_clone_pause.remove_css_class("paused");
+                status_badge_clone_pause.add_css_class("paused");
+                status_icon_label_clone_pause.set_markup("<span size='large' weight='bold'>⏸</span>");
+                status_label_clone_pause.set_markup("<span weight='medium'>Pausado</span>");
             } else {
                 btn.set_icon_name("media-playback-pause-symbolic");
                 btn.set_tooltip_text(Some("Pausar"));
+                
+                // Atualiza UI para em progresso
+                status_badge_clone_pause.remove_css_class("paused");
+                status_badge_clone_pause.remove_css_class("in-progress");
+                status_badge_clone_pause.add_css_class("in-progress");
+                status_icon_label_clone_pause.set_markup("<span size='large' weight='bold'>⬇</span>");
+                status_label_clone_pause.set_markup("<span weight='medium'>Em progresso</span>");
             }
 
             // Atualiza was_paused no registro
