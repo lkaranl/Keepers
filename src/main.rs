@@ -491,7 +491,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     // Botão de abrir (apenas para completados)
     if record.status == DownloadStatus::Completed {
         let open_btn = Button::builder()
-            .icon_name("folder-open-symbolic")
+            .icon_name("document-open-symbolic")
             .tooltip_text("Abrir arquivo")
             .build();
 
@@ -503,6 +503,24 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         });
 
         buttons_box.append(&open_btn);
+        
+        // Botão de abrir explorador de arquivos
+        let open_folder_btn = Button::builder()
+            .icon_name("folder-open-symbolic")
+            .tooltip_text("Abrir pasta no explorador")
+            .build();
+
+        let file_path_folder = record.file_path.clone();
+        open_folder_btn.connect_clicked(move |_| {
+            if let Some(ref path) = file_path_folder {
+                // Abre a pasta que contém o arquivo
+                if let Some(parent) = PathBuf::from(path).parent() {
+                    let _ = open::that(parent);
+                }
+            }
+        });
+
+        buttons_box.append(&open_folder_btn);
     }
 
     // Botão de excluir
@@ -652,8 +670,15 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
     // Botão de abrir arquivo (inicialmente escondido)
     let open_btn = Button::builder()
-        .icon_name("folder-open-symbolic")
+        .icon_name("document-open-symbolic")
         .tooltip_text("Abrir arquivo")
+        .visible(false)
+        .build();
+
+    // Botão de abrir explorador de arquivos (inicialmente escondido)
+    let open_folder_btn = Button::builder()
+        .icon_name("folder-open-symbolic")
+        .tooltip_text("Abrir pasta no explorador")
         .visible(false)
         .build();
 
@@ -679,6 +704,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .build();
 
     buttons_box.append(&open_btn);
+    buttons_box.append(&open_folder_btn);
     buttons_box.append(&pause_btn);
     buttons_box.append(&cancel_btn);
     buttons_box.append(&delete_btn);
@@ -751,6 +777,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
     let open_btn_clone = open_btn.clone();
+    let open_folder_btn_clone = open_folder_btn.clone();
     let delete_btn_clone = delete_btn.clone();
     let download_task_clone_msg = download_task.clone();
     let record_url_clone = record_url.clone();
@@ -798,6 +825,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     pause_btn_clone.set_visible(false);
                     cancel_btn_clone.set_visible(false);
                     open_btn_clone.set_visible(true);
+                    open_folder_btn_clone.set_visible(true);
                     delete_btn_clone.set_visible(true);
 
                     // Marca como completo e obtém o caminho do arquivo
@@ -856,6 +884,21 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 // Abre o arquivo com o app padrão do sistema
                 if let Err(e) = open::that(path) {
                     eprintln!("Erro ao abrir arquivo: {}", e);
+                }
+            }
+        }
+    });
+
+    // Handler para botão de abrir pasta no explorador
+    let download_task_clone_folder = download_task.clone();
+    open_folder_btn.connect_clicked(move |_| {
+        if let Ok(task) = download_task_clone_folder.lock() {
+            if let Some(ref path) = task.file_path {
+                // Abre a pasta que contém o arquivo no explorador
+                if let Some(parent) = PathBuf::from(path).parent() {
+                    if let Err(e) = open::that(parent) {
+                        eprintln!("Erro ao abrir pasta: {}", e);
+                    }
                 }
             }
         }
