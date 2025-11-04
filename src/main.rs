@@ -16,6 +16,8 @@ use chrono::{DateTime, Utc};
 const APP_ID: &str = "com.downstream.app";
 const DEFAULT_NUM_CHUNKS: u64 = 4; // Número padrão de chunks paralelos
 const MIN_CHUNK_SIZE: u64 = 1024 * 1024; // 1MB - tamanho mínimo por chunk
+const MAX_RETRIES: u32 = 3; // Número máximo de tentativas em caso de erro de conexão
+const RETRY_DELAY_SECS: u64 = 2; // Delay entre tentativas em segundos
 
 #[derive(Clone, Debug)]
 enum DownloadMessage {
@@ -1103,8 +1105,8 @@ fn start_download(
                     }
                 };
 
-            // Faz requisição HEAD para obter tamanho total e verificar suporte a Range
-            let (total_size, supports_range) = match client.head(&url).send().await {
+            // Faz requisição HEAD para obter tamanho total e verificar suporte a Range (com retry)
+            let (total_size, supports_range) = match retry_request(|| client.head(&url).send(), MAX_RETRIES, RETRY_DELAY_SECS).await {
                 Ok(resp) => {
                     let size = resp.headers()
                         .get(reqwest::header::CONTENT_LENGTH)
@@ -1121,7 +1123,7 @@ fn start_download(
                     (size, supports)
                 }
                 Err(e) => {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao obter info: {}", e))).await;
+                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao obter info após {} tentativas: {}", MAX_RETRIES, e))).await;
                     return;
                 }
             };
@@ -1278,12 +1280,15 @@ async fn download_chunk(
 ) -> Result<(), String> {
     let range_header = format!("bytes={}-{}", start, end);
     
-    let response = client
-        .get(url)
-        .header(reqwest::header::RANGE, &range_header)
-        .send()
-        .await
-        .map_err(|e| format!("Erro na requisição: {}", e))?;
+    // Tenta fazer requisição com retry automático
+    let response = retry_request(|| {
+        client
+            .get(url)
+            .header(reqwest::header::RANGE, &range_header)
+            .send()
+    }, MAX_RETRIES, RETRY_DELAY_SECS)
+    .await
+    .map_err(|e| format!("Erro na requisição após {} tentativas: {}", MAX_RETRIES, e))?;
 
     if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
         return Err(format!("Status HTTP: {}", response.status()));
@@ -1407,16 +1412,18 @@ async fn download_sequential(
         }
     };
 
-    // Faz requisição com Range header para resume
-    let mut request = client.get(url);
-    if downloaded > 0 {
-        request = request.header(reqwest::header::RANGE, format!("bytes={}-", downloaded));
-    }
-
-    let response = match request.send().await {
+    // Faz requisição com Range header para resume (com retry)
+    let downloaded_bytes = downloaded;
+    let response = match retry_request(|| {
+        let mut req = client.get(url);
+        if downloaded_bytes > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={}-", downloaded_bytes));
+        }
+        req.send()
+    }, MAX_RETRIES, RETRY_DELAY_SECS).await {
         Ok(resp) => resp,
         Err(e) => {
-            let _ = tx.send(DownloadMessage::Error(format!("Erro na requisição: {}", e))).await;
+            let _ = tx.send(DownloadMessage::Error(format!("Erro na requisição após {} tentativas: {}", MAX_RETRIES, e))).await;
             return;
         }
     };
@@ -1459,6 +1466,7 @@ async fn download_sequential(
         let chunk = match chunk_result {
             Ok(c) => c,
             Err(e) => {
+                // Erro durante stream - não tenta retry aqui (já foi feito na requisição inicial)
                 let _ = tx.send(DownloadMessage::Error(format!("Erro ao baixar: {}", e))).await;
                 return;
             }
@@ -1586,5 +1594,51 @@ fn format_eta(seconds: f64) -> String {
         format!("{}s", secs)
     } else {
         "< 1s".to_string()
+    }
+}
+
+// Função auxiliar para verificar se um erro é recuperável (timeout, conexão)
+fn is_recoverable_error(err: &reqwest::Error) -> bool {
+    err.is_timeout() || err.is_connect() || err.is_request()
+}
+
+// Função auxiliar para fazer retry automático em requisições
+async fn retry_request<F, Fut, T>(request_fn: F, max_retries: u32, delay_secs: u64) -> Result<T, reqwest::Error>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, reqwest::Error>>,
+{
+    let mut last_error = None;
+    
+    for attempt in 0..max_retries {
+        match request_fn().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                // Verifica se é erro recuperável
+                if !is_recoverable_error(&e) {
+                    // Erro não recuperável (404, 403, etc.) - não tenta novamente
+                    return Err(e);
+                }
+                
+                last_error = Some(e);
+                
+                // Se não é a última tentativa, aguarda antes de tentar novamente
+                if attempt < max_retries - 1 {
+                    // Delay exponencial: 2s, 4s, 8s...
+                    let delay = delay_secs * (1 << attempt);
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                }
+            }
+        }
+    }
+    
+    // Retorna o último erro se todas as tentativas falharam
+    // Se não houver erro anterior (não deveria acontecer), tenta fazer uma última requisição
+    match last_error {
+        Some(e) => Err(e),
+        None => {
+            // Faz uma última tentativa
+            request_fn().await
+        }
     }
 }
