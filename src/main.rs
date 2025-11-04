@@ -908,8 +908,6 @@ fn start_download(
             for chunk_id in 0..num_chunks {
                 let start = chunk_id * chunk_size;
                 let end = if chunk_id == num_chunks - 1 {
-                let start = chunk_id * chunk_size;
-                let end = if chunk_id == NUM_CHUNKS - 1 {
                     start + last_chunk_size - 1
                 } else {
                     start + chunk_size - 1
@@ -1243,6 +1241,29 @@ async fn download_sequential(
     }
 
     let _ = tx.send(DownloadMessage::Complete).await;
+}
+
+fn calculate_optimal_chunks(file_size: u64) -> u64 {
+    // Calcula número ótimo de chunks baseado no tamanho do arquivo
+    // - Arquivos pequenos (< 10MB): 2 chunks
+    // - Arquivos médios (10MB - 100MB): 4 chunks (padrão)
+    // - Arquivos grandes (100MB - 1GB): 6 chunks
+    // - Arquivos muito grandes (> 1GB): 8 chunks
+    // Garante que cada chunk tenha pelo menos MIN_CHUNK_SIZE
+    
+    let max_chunks_by_size = file_size / MIN_CHUNK_SIZE;
+    let suggested_chunks = if file_size < 10 * 1024 * 1024 {
+        2
+    } else if file_size < 100 * 1024 * 1024 {
+        DEFAULT_NUM_CHUNKS
+    } else if file_size < 1024 * 1024 * 1024 {
+        6
+    } else {
+        8
+    };
+    
+    // Usa o menor valor entre o sugerido e o máximo possível
+    suggested_chunks.min(max_chunks_by_size.max(1))
 }
 
 fn format_bytes(bytes: u64) -> String {
