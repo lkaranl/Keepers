@@ -10,6 +10,9 @@ description = "Gerenciador minimalista de downloads com GTK4 e aria2c"
 gtk4 = { version = "0.7", features = ["v4_6"] }
 libadwaita = { version = "0.5", features = ["v1_2"] }
 dirs = "5.0"
+reqwest = { version = "0.12", features = ["stream"] }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
 
 [profile.release]
 opt-level = 3
