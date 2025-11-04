@@ -7,6 +7,7 @@ use std::time::Instant;
 use futures_util::StreamExt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use async_channel;
 
 const APP_ID: &str = "com.downstream.app";
 
@@ -21,6 +22,8 @@ enum DownloadMessage {
 struct DownloadTask {
     paused: bool,
     cancelled: bool,
+    completed: bool,
+    file_path: Option<PathBuf>,
 }
 
 struct AppState {
@@ -134,26 +137,64 @@ fn build_ui(app: &Application) {
 fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(8)
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
+        .spacing(12)
+        .margin_top(16)
+        .margin_bottom(16)
+        .margin_start(16)
+        .margin_end(16)
         .build();
 
     let filename = url.split('/').last().unwrap_or("download").to_string();
 
-    // Header com título e botões
-    let header_box = GtkBox::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .build();
-
+    // Header com título
     let title_label = Label::builder()
         .label(&filename)
         .halign(gtk4::Align::Start)
         .hexpand(true)
-        .css_classes(vec!["title-4"])
+        .css_classes(vec!["title-3"])
+        .ellipsize(gtk4::pango::EllipsizeMode::Middle)
+        .build();
+
+    // Barra de progresso
+    let progress_bar = gtk4::ProgressBar::builder()
+        .hexpand(true)
+        .show_text(true)
+        .build();
+
+    // Box de status e velocidade
+    let info_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(12)
+        .build();
+
+    let status_label = Label::builder()
+        .label("Iniciando...")
+        .halign(gtk4::Align::Start)
+        .hexpand(true)
+        .css_classes(vec!["caption", "dim-label"])
+        .build();
+
+    let speed_label = Label::builder()
+        .label("")
+        .halign(gtk4::Align::End)
+        .css_classes(vec!["caption"])
+        .build();
+
+    info_box.append(&status_label);
+    info_box.append(&speed_label);
+
+    // Box de botões de ação
+    let buttons_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .halign(gtk4::Align::End)
+        .build();
+
+    // Botão de abrir arquivo (inicialmente escondido)
+    let open_btn = Button::builder()
+        .icon_name("folder-open-symbolic")
+        .tooltip_text("Abrir arquivo")
+        .visible(false)
         .build();
 
     // Botão de pausa/retomar
@@ -169,30 +210,23 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .css_classes(vec!["destructive-action"])
         .build();
 
-    header_box.append(&title_label);
-    header_box.append(&pause_btn);
-    header_box.append(&cancel_btn);
-
-    let progress_box = GtkBox::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
+    // Botão de excluir (inicialmente escondido)
+    let delete_btn = Button::builder()
+        .icon_name("user-trash-symbolic")
+        .tooltip_text("Remover da lista")
+        .visible(false)
+        .css_classes(vec!["destructive-action"])
         .build();
 
-    let progress_bar = gtk4::ProgressBar::builder()
-        .hexpand(true)
-        .show_text(true)
-        .build();
+    buttons_box.append(&open_btn);
+    buttons_box.append(&pause_btn);
+    buttons_box.append(&cancel_btn);
+    buttons_box.append(&delete_btn);
 
-    let status_label = Label::builder()
-        .label("Iniciando...")
-        .css_classes(vec!["dim-label"])
-        .build();
-
-    progress_box.append(&progress_bar);
-    progress_box.append(&status_label);
-
-    row_box.append(&header_box);
-    row_box.append(&progress_box);
+    row_box.append(&title_label);
+    row_box.append(&progress_bar);
+    row_box.append(&info_box);
+    row_box.append(&buttons_box);
 
     list_box.append(&row_box);
 
@@ -200,51 +234,79 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let download_task = Arc::new(Mutex::new(DownloadTask {
         paused: false,
         cancelled: false,
+        completed: false,
+        file_path: None,
     }));
 
     if let Ok(mut state) = state.lock() {
         state.downloads.push(download_task.clone());
     }
 
-    // Cria channel para comunicação entre threads usando glib
-    let (msg_tx, msg_rx) = glib::MainContext::channel(glib::Priority::DEFAULT);
+    // Cria channel para comunicação entre threads usando async-channel
+    let (msg_tx, msg_rx) = async_channel::unbounded();
 
     // Inicia o download em thread separada
     start_download(url, &filename, msg_tx, download_task.clone());
 
-    // Monitora mensagens na thread principal do GTK
+    // Monitora mensagens na thread principal do GTK usando spawn_future_local
     let progress_bar_clone = progress_bar.clone();
     let status_label_clone = status_label.clone();
+    let speed_label_clone = speed_label.clone();
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
-    let row_box_clone = row_box.clone();
+    let open_btn_clone = open_btn.clone();
+    let delete_btn_clone = delete_btn.clone();
+    let download_task_clone_msg = download_task.clone();
 
-    msg_rx.attach(None, move |msg| {
-        match msg {
-            DownloadMessage::Progress(progress, status_text, speed) => {
-                progress_bar_clone.set_fraction(progress);
-                progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
-                let display_text = if !speed.is_empty() {
-                    format!("{} - {}", status_text, speed)
-                } else {
-                    status_text
-                };
-                status_label_clone.set_text(&display_text);
-                glib::ControlFlow::Continue
+    glib::spawn_future_local(async move {
+        while let Ok(msg) = msg_rx.recv().await {
+            match msg {
+                DownloadMessage::Progress(progress, status_text, speed) => {
+                    progress_bar_clone.set_fraction(progress);
+                    progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
+                    status_label_clone.set_text(&status_text);
+                    speed_label_clone.set_text(&speed);
+                }
+                DownloadMessage::Complete => {
+                    progress_bar_clone.set_fraction(1.0);
+                    progress_bar_clone.set_text(Some("100%"));
+                    status_label_clone.set_text("Concluído");
+                    speed_label_clone.set_text("✓");
+
+                    // Esconde botões de controle e mostra botões de arquivo completo
+                    pause_btn_clone.set_visible(false);
+                    cancel_btn_clone.set_visible(false);
+                    open_btn_clone.set_visible(true);
+                    delete_btn_clone.set_visible(true);
+
+                    // Marca como completo
+                    if let Ok(mut task) = download_task_clone_msg.lock() {
+                        task.completed = true;
+                    }
+
+                    break;
+                }
+                DownloadMessage::Error(err) => {
+                    status_label_clone.set_text(&format!("Erro: {}", err));
+                    speed_label_clone.set_text("");
+                    pause_btn_clone.set_visible(false);
+                    cancel_btn_clone.set_visible(false);
+                    delete_btn_clone.set_visible(true);
+                    break;
+                }
             }
-            DownloadMessage::Complete => {
-                progress_bar_clone.set_fraction(1.0);
-                progress_bar_clone.set_text(Some("100%"));
-                status_label_clone.set_text("Concluído ✓");
-                pause_btn_clone.set_sensitive(false);
-                cancel_btn_clone.set_sensitive(false);
-                glib::ControlFlow::Break
-            }
-            DownloadMessage::Error(err) => {
-                status_label_clone.set_text(&format!("Erro: {}", err));
-                pause_btn_clone.set_sensitive(false);
-                cancel_btn_clone.set_sensitive(false);
-                glib::ControlFlow::Break
+        }
+    });
+
+    // Handler para botão de abrir arquivo
+    let download_task_clone = download_task.clone();
+    open_btn.connect_clicked(move |_| {
+        if let Ok(task) = download_task_clone.lock() {
+            if let Some(ref path) = task.file_path {
+                // Abre o arquivo com o app padrão do sistema
+                if let Err(e) = open::that(path) {
+                    eprintln!("Erro ao abrir arquivo: {}", e);
+                }
             }
         }
     });
@@ -265,20 +327,40 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     });
 
     // Handler para botão de cancelar
-    let list_box_clone = list_box.clone();
     let download_task_clone = download_task.clone();
+    let row_box_clone_cancel = row_box.clone();
     cancel_btn.connect_clicked(move |_| {
         if let Ok(mut task) = download_task_clone.lock() {
             task.cancelled = true;
         }
-        list_box_clone.remove(&row_box_clone);
+        // Remove a ListBoxRow parent
+        if let Some(parent) = row_box_clone_cancel.parent() {
+            if let Some(grandparent) = parent.parent() {
+                if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
+                    list_box.remove(&parent);
+                }
+            }
+        }
+    });
+
+    // Handler para botão de excluir
+    let row_box_clone_delete = row_box.clone();
+    delete_btn.connect_clicked(move |_| {
+        // Remove a ListBoxRow parent
+        if let Some(parent) = row_box_clone_delete.parent() {
+            if let Some(grandparent) = parent.parent() {
+                if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
+                    list_box.remove(&parent);
+                }
+            }
+        }
     });
 }
 
 fn start_download(
     url: &str,
     filename: &str,
-    tx: glib::Sender<DownloadMessage>,
+    tx: async_channel::Sender<DownloadMessage>,
     download_task: Arc<Mutex<DownloadTask>>,
 ) {
     let url = url.to_string();
@@ -303,7 +385,7 @@ fn start_download(
                 .build() {
                     Ok(c) => c,
                     Err(e) => {
-                        let _ = tx.send(DownloadMessage::Error(format!("Erro ao criar client: {}", e)));
+                        let _ = tx.send(DownloadMessage::Error(format!("Erro ao criar client: {}", e))).await;
                         return;
                     }
                 };
@@ -318,7 +400,7 @@ fn start_download(
                         .unwrap_or(0)
                 }
                 Err(e) => {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao obter info: {}", e)));
+                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao obter info: {}", e))).await;
                     return;
                 }
             };
@@ -338,7 +420,7 @@ fn start_download(
             } {
                 Ok(f) => f,
                 Err(e) => {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao criar arquivo: {}", e)));
+                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao criar arquivo: {}", e))).await;
                     return;
                 }
             };
@@ -349,16 +431,16 @@ fn start_download(
                 request = request.header(reqwest::header::RANGE, format!("bytes={}-", downloaded));
             }
 
-            let mut response = match request.send().await {
+            let response = match request.send().await {
                 Ok(resp) => resp,
                 Err(e) => {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro na requisição: {}", e)));
+                    let _ = tx.send(DownloadMessage::Error(format!("Erro na requisição: {}", e))).await;
                     return;
                 }
             };
 
             if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-                let _ = tx.send(DownloadMessage::Error(format!("Status HTTP: {}", response.status())));
+                let _ = tx.send(DownloadMessage::Error(format!("Status HTTP: {}", response.status()))).await;
                 return;
             }
 
@@ -380,7 +462,7 @@ fn start_download(
 
                     if cancelled {
                         let _ = std::fs::remove_file(&temp_path);
-                        let _ = tx.send(DownloadMessage::Error("Cancelado".to_string()));
+                        let _ = tx.send(DownloadMessage::Error("Cancelado".to_string())).await;
                         return;
                     }
 
@@ -389,19 +471,19 @@ fn start_download(
                     }
 
                     // Aguarda enquanto pausado
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
 
                 let chunk = match chunk_result {
                     Ok(c) => c,
                     Err(e) => {
-                        let _ = tx.send(DownloadMessage::Error(format!("Erro ao baixar: {}", e)));
+                        let _ = tx.send(DownloadMessage::Error(format!("Erro ao baixar: {}", e))).await;
                         return;
                     }
                 };
 
                 if let Err(e) = file.write_all(&chunk) {
-                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao escrever: {}", e)));
+                    let _ = tx.send(DownloadMessage::Error(format!("Erro ao escrever: {}", e))).await;
                     return;
                 }
 
@@ -420,7 +502,7 @@ fn start_download(
 
                     let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
 
-                    let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text));
+                    let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text)).await;
 
                     last_update = Instant::now();
                     last_downloaded = downloaded;
@@ -430,11 +512,16 @@ fn start_download(
             // Download completo - renomeia arquivo
             drop(file);
             if let Err(e) = std::fs::rename(&temp_path, &file_path) {
-                let _ = tx.send(DownloadMessage::Error(format!("Erro ao finalizar: {}", e)));
+                let _ = tx.send(DownloadMessage::Error(format!("Erro ao finalizar: {}", e))).await;
                 return;
             }
 
-            let _ = tx.send(DownloadMessage::Complete);
+            // Salva o caminho do arquivo no download task
+            if let Ok(mut task) = download_task.lock() {
+                task.file_path = Some(file_path.clone());
+            }
+
+            let _ = tx.send(DownloadMessage::Complete).await;
         });
     });
 }
