@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager};
@@ -574,6 +574,16 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     row_box.append(&info_box);
     row_box.append(&buttons_box);
 
+    // Adiciona separador visual antes do item (exceto o primeiro)
+    if let Some(_first_child) = list_box.first_child() {
+        let separator = Separator::builder()
+            .orientation(Orientation::Horizontal)
+            .margin_start(16)
+            .margin_end(16)
+            .build();
+        list_box.append(&separator);
+    }
+
     list_box.append(&row_box);
 }
 
@@ -715,6 +725,16 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     row_box.append(&progress_bar);
     row_box.append(&info_box);
     row_box.append(&buttons_box);
+
+    // Adiciona separador visual antes do item (exceto o primeiro)
+    if let Some(_first_child) = list_box.first_child() {
+        let separator = Separator::builder()
+            .orientation(Orientation::Horizontal)
+            .margin_start(16)
+            .margin_end(16)
+            .build();
+        list_box.append(&separator);
+    }
 
     list_box.append(&row_box);
 
