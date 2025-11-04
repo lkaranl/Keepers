@@ -306,11 +306,11 @@ fn build_ui(app: &Application) {
 fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(12)
-        .margin_top(16)
-        .margin_bottom(16)
-        .margin_start(16)
-        .margin_end(16)
+        .spacing(16)
+        .margin_top(20)
+        .margin_bottom(20)
+        .margin_start(20)
+        .margin_end(20)
         .build();
 
     // Se estiver cancelado, aplica estilo especial (opaco)
@@ -359,7 +359,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     // Box de status
     let info_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(12)
+        .spacing(16)
         .build();
 
     let status_text = match record.status {
@@ -394,7 +394,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     // Box de botões
     let buttons_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(8)
+        .spacing(12)
         .halign(gtk4::Align::End)
         .build();
 
@@ -590,11 +590,11 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
 fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(12)
-        .margin_top(16)
-        .margin_bottom(16)
-        .margin_start(16)
-        .margin_end(16)
+        .spacing(16)
+        .margin_top(20)
+        .margin_bottom(20)
+        .margin_start(20)
+        .margin_end(20)
         .build();
 
     let filename = url.split('/').last().unwrap_or("download").to_string();
@@ -602,7 +602,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Header com título e tag de chunks paralelos
     let title_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(8)
+        .spacing(12)
         .halign(gtk4::Align::Start)
         .build();
 
@@ -639,7 +639,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Box de status e velocidade
     let info_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(12)
+        .spacing(16)
         .build();
 
     let status_label = Label::builder()
@@ -676,7 +676,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Box de botões de ação
     let buttons_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(8)
+        .spacing(12)
         .halign(gtk4::Align::End)
         .build();
 
