@@ -13,6 +13,8 @@ use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 
 const APP_ID: &str = "com.downstream.app";
+const DEFAULT_NUM_CHUNKS: u64 = 4; // Número padrão de chunks paralelos
+const MIN_CHUNK_SIZE: u64 = 1024 * 1024; // 1MB - tamanho mínimo por chunk
 
 #[derive(Clone, Debug)]
 enum DownloadMessage {
@@ -860,9 +862,11 @@ fn start_download(
             }
 
             // Download paralelo em chunks
-            const NUM_CHUNKS: u64 = 4;
-            let chunk_size = total_size / NUM_CHUNKS;
-            let last_chunk_size = total_size - (chunk_size * (NUM_CHUNKS - 1));
+            // Calcula número ótimo de chunks baseado no tamanho do arquivo
+            // Arquivos grandes podem se beneficiar de mais chunks
+            let num_chunks = calculate_optimal_chunks(total_size);
+            let chunk_size = total_size / num_chunks;
+            let last_chunk_size = total_size - (chunk_size * (num_chunks - 1));
 
             // Cria arquivo vazio
             let file_handle = match tokio::fs::File::create(&temp_path).await {
@@ -894,14 +898,16 @@ fn start_download(
             };
 
             // Progresso compartilhado entre chunks
-            let progress = Arc::new(AsyncMutex::new(vec![0u64; NUM_CHUNKS as usize]));
+            let progress = Arc::new(AsyncMutex::new(vec![0u64; num_chunks as usize]));
             let last_update = Arc::new(AsyncMutex::new(Instant::now()));
             let last_downloaded = Arc::new(AsyncMutex::new(0u64));
 
             // Baixa cada chunk em paralelo
             let mut handles = Vec::new();
 
-            for chunk_id in 0..NUM_CHUNKS {
+            for chunk_id in 0..num_chunks {
+                let start = chunk_id * chunk_size;
+                let end = if chunk_id == num_chunks - 1 {
                 let start = chunk_id * chunk_size;
                 let end = if chunk_id == NUM_CHUNKS - 1 {
                     start + last_chunk_size - 1
