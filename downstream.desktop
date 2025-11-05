@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DownStream
+Comment=Gerenciador de downloads leve e persistente
+Exec=/home/karan/Documentos/GitHub/Keepers/target/release/downstream
+Icon=folder-download-symbolic
+Terminal=false
+Categories=Network;FileTransfer;
+StartupNotify=true
