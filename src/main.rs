@@ -200,7 +200,7 @@ fn build_ui(app: &Application) {
 
     let window = AdwApplicationWindow::builder()
         .application(app)
-        .title("DownStream")
+        .title("Keepers")
         .default_width(700)
         .default_height(500)
         .build();
