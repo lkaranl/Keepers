@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider, Image};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, CssProvider};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager, MessageDialog, ResponseAppearance};
@@ -20,17 +20,17 @@ const MAX_RETRIES: u32 = 3; // Número máximo de tentativas em caso de erro de 
 const RETRY_DELAY_SECS: u64 = 2; // Delay entre tentativas em segundos
 
 // ===== DESIGN TOKENS =====
-// Sistema de espaçamento padronizado
-const SPACING_LARGE: i32 = 16;  // Espaçamento entre seções principais
-const SPACING_MEDIUM: i32 = 12; // Espaçamento entre grupos relacionados
-const SPACING_SMALL: i32 = 8;   // Espaçamento entre elementos próximos
-const SPACING_TINY: i32 = 4;    // Espaçamento mínimo dentro de componentes
+// Sistema de espaçamento padronizado (ultra minimalista)
+const SPACING_LARGE: i32 = 8;  // Espaçamento entre seções principais
+const SPACING_MEDIUM: i32 = 6;  // Espaçamento entre grupos relacionados
+const SPACING_SMALL: i32 = 4;   // Espaçamento entre elementos próximos
+const SPACING_TINY: i32 = 2;    // Espaçamento mínimo dentro de componentes
 
-// Sistema de border radius
-const RADIUS_LARGE: &str = "12px";   // Cards, badges grandes
-const RADIUS_MEDIUM: &str = "8px";   // Cards principais, containers
-const RADIUS_SMALL: &str = "6px";    // Elementos internos, grupos
-const RADIUS_TINY: &str = "4px";     // Progress bars, elementos pequenos
+// Sistema de border radius (ultra minimalista)
+const RADIUS_LARGE: &str = "6px";   // Cards, badges grandes
+const RADIUS_MEDIUM: &str = "4px";   // Cards principais, containers
+const RADIUS_SMALL: &str = "3px";    // Elementos internos, grupos
+const RADIUS_TINY: &str = "2px";     // Progress bars, elementos pequenos
 
 // Sistema de cores (usando paleta Tailwind para consistência)
 const COLOR_SUCCESS: &str = "#10b981";  // Verde - Downloads concluídos
@@ -239,9 +239,9 @@ fn build_ui(app: &Application) {
     let scrolled = ScrolledWindow::builder()
         .hexpand(true)
         .vexpand(true)
-        .margin_start(24)
-        .margin_end(24)
-        .margin_bottom(24)
+        .margin_start(8)
+        .margin_end(8)
+        .margin_bottom(8)
         .build();
 
     let list_box = ListBox::builder()
@@ -256,7 +256,7 @@ fn build_ui(app: &Application) {
         .orientation(Orientation::Vertical)
         .vexpand(true)
         .valign(gtk4::Align::Center)
-        .spacing(16)
+        .spacing(8)
         .build();
 
     let empty_status = StatusPage::builder()
@@ -357,11 +357,11 @@ fn build_ui(app: &Application) {
             // Container para o entry com margens adequadas
             let entry_box = GtkBox::builder()
                 .orientation(Orientation::Vertical)
-                .spacing(12)
-                .margin_top(12)
-                .margin_bottom(12)
-                .margin_start(12)
-                .margin_end(12)
+                .spacing(8)
+                .margin_top(8)
+                .margin_bottom(8)
+                .margin_start(8)
+                .margin_end(8)
                 .build();
 
             entry_box.append(&url_entry);
@@ -443,56 +443,89 @@ fn build_ui(app: &Application) {
     let css = format!("
         /* ===== DESIGN SYSTEM BASEADO EM TOKENS ===== */
 
-        /* Card elevation para items de download */
+        /* Cor de fundo da janela principal - transparente */
+        // window {{
+        //     background-color: transparent;
+        // }}
+
+        /* Cor de fundo do container principal (ScrolledWindow) */
+        scrolledwindow {{
+            background-color: transparent;
+        }}
+
+        /* Cor de fundo da lista de downloads (ListBox) */
+        list {{
+            background-color: transparent;
+        }}
+
+        /* Cor de fundo da lista de downloads com classe boxed-list */
+        .boxed-list {{
+            background-color: transparent;
+        }}
+
+        /* Card minimalista - sem bordas, sem background */
         .download-card {{
-            border: 1px solid alpha(currentColor, {});
-            border-radius: {};
-            background-color: alpha(@window_bg_color, 0.5);
+            border: none;
+            border-radius: 10px;
+            background-color: alpha(currentColor, 0.08);
+            padding: 10px;
         }}
 
-        /* Progress bar com altura maior */
+        /* Progress bar minimalista */
         .download-progress {{
-            min-height: 8px;
-            border-radius: {};
+            min-height: 4px;
+            border-radius: 0;
+        }}
+        
+        .download-progress trough {{
+            background-color: alpha(currentColor, 0.08);
+            border-radius: 0;
+        }}
+        
+        .download-progress progress {{
+            background-color: {};
+            color: {};
+            border-radius: 0;
+        }}
+        
+        .download-progress.cancelled-progress progress {{
+            background-color: {};
+            color: {};
         }}
 
-        /* Sistema de Badges */
+        /* Badges minimalistas - sem background, apenas cor de texto */
         .status-badge {{
-            border-radius: {};
-            padding: {}px {}px;
+            border-radius: 0;
+            padding: 0;
             margin: 0;
+            background-color: transparent;
         }}
 
         .status-badge.completed {{
-            background-color: alpha({}, {});
             color: {};
         }}
 
         .status-badge.in-progress {{
-            background-color: alpha({}, {});
             color: {};
         }}
 
         .status-badge.paused {{
-            background-color: alpha({}, {});
             color: {};
         }}
 
         .status-badge.failed {{
-            background-color: alpha({}, {});
             color: {};
         }}
 
         .status-badge.cancelled {{
-            background-color: alpha({}, {});
             color: {};
         }}
 
-        /* Grupo de metadados com separação visual */
+        /* Metadados minimalistas - sem background */
         .metadata-group {{
-            padding: {}px {}px;
-            border-radius: {};
-            background-color: alpha(currentColor, {});
+            padding: 0;
+            border-radius: 0;
+            background-color: transparent;
         }}
 
         /* Melhor contraste para labels secundários */
@@ -505,19 +538,15 @@ fn build_ui(app: &Application) {
             opacity: {};
         }}
     ",
-        OPACITY_CARD_BORDER,
-        RADIUS_MEDIUM,
-        RADIUS_TINY,
-        RADIUS_LARGE,
-        SPACING_TINY, SPACING_MEDIUM,
-        COLOR_SUCCESS, OPACITY_BADGE_BG, COLOR_SUCCESS,
-        COLOR_INFO, OPACITY_BADGE_BG, COLOR_INFO,
-        COLOR_WARNING, OPACITY_BADGE_BG, COLOR_WARNING,
-        COLOR_ERROR, OPACITY_BADGE_BG, COLOR_ERROR,
-        COLOR_NEUTRAL, OPACITY_BADGE_BG, COLOR_NEUTRAL,
-        SPACING_SMALL, SPACING_MEDIUM,
-        RADIUS_SMALL,
-        OPACITY_METADATA_BG,
+        COLOR_INFO,
+        COLOR_INFO,
+        COLOR_NEUTRAL,
+        COLOR_NEUTRAL,
+        COLOR_SUCCESS,
+        COLOR_INFO,
+        COLOR_WARNING,
+        COLOR_ERROR,
+        COLOR_NEUTRAL,
         OPACITY_DIM_TEXT,
         OPACITY_CANCELLED
     );
@@ -547,11 +576,11 @@ fn build_ui(app: &Application) {
 fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(SPACING_LARGE)
-        .margin_top(SPACING_LARGE)
-        .margin_bottom(SPACING_LARGE)
-        .margin_start(SPACING_LARGE)
-        .margin_end(SPACING_LARGE)
+        .spacing(SPACING_MEDIUM)
+        .margin_top(SPACING_MEDIUM)
+        .margin_bottom(SPACING_MEDIUM)
+        .margin_start(SPACING_MEDIUM)
+        .margin_end(SPACING_MEDIUM)
         .css_classes(vec!["download-card"])
         .build();
 
@@ -668,10 +697,10 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     status_badge.append(&status_label);
     status_box.append(&status_badge);
 
-    // Box para metadados (tamanho e data) - layout horizontal
+    // Box para metadados (tamanho e data) - layout horizontal minimalista
     let metadata_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(SPACING_MEDIUM)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::End)
         .css_classes(vec!["metadata-group"])
         .build();
@@ -688,12 +717,6 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     };
     size_label.set_markup(&markup_metadata_primary(&size_text));
 
-    // Separador visual
-    let metadata_separator = Label::builder()
-        .label("•")
-        .css_classes(vec!["dim-label"])
-        .build();
-
     let date_label = Label::builder()
         .halign(gtk4::Align::End)
         .css_classes(vec!["dim-label"])
@@ -704,7 +727,6 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     date_label.set_markup(&markup_metadata_secondary(&date_text));
 
     metadata_box.append(&size_label);
-    metadata_box.append(&metadata_separator);
     metadata_box.append(&date_label);
 
     info_box.append(&status_box);
@@ -912,27 +934,18 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     row_box.append(&info_box);
     row_box.append(&buttons_box);
 
-    // Adiciona separador visual antes do item (exceto o primeiro)
-    if let Some(_first_child) = list_box.first_child() {
-        let separator = Separator::builder()
-            .orientation(Orientation::Horizontal)
-            .margin_start(16)
-            .margin_end(16)
-            .build();
-        list_box.append(&separator);
-    }
-
+    // Design minimalista - sem separadores entre cards
     list_box.append(&row_box);
 }
 
 fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(SPACING_LARGE)
-        .margin_top(SPACING_LARGE)
-        .margin_bottom(SPACING_LARGE)
-        .margin_start(SPACING_LARGE)
-        .margin_end(SPACING_LARGE)
+        .spacing(SPACING_MEDIUM)
+        .margin_top(SPACING_MEDIUM)
+        .margin_bottom(SPACING_MEDIUM)
+        .margin_start(SPACING_MEDIUM)
+        .margin_end(SPACING_MEDIUM)
         .css_classes(vec!["download-card"])
         .build();
 
@@ -1026,10 +1039,10 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     status_badge.append(&status_label);
     status_box.append(&status_badge);
 
-    // Box para metadados (tamanho, velocidade e ETA) - layout horizontal
+    // Box para metadados (tamanho, velocidade e ETA) - layout horizontal minimalista
     let metadata_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(SPACING_MEDIUM)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::End)
         .css_classes(vec!["metadata-group"])
         .build();
@@ -1041,26 +1054,12 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
 
     size_label.set_markup(&markup_metadata_primary(""));
 
-    // Separador visual entre tamanho e velocidade
-    let metadata_separator1 = Label::builder()
-        .label("•")
-        .css_classes(vec!["dim-label"])
-        .visible(false)
-        .build();
-
     let speed_label = Label::builder()
         .halign(gtk4::Align::End)
         .build();
 
     // Velocidade com peso semibold para destaque (inicialmente vazio)
     speed_label.set_markup(&markup_metadata_primary(""));
-
-    // Separador visual entre velocidade e ETA
-    let metadata_separator2 = Label::builder()
-        .label("•")
-        .css_classes(vec!["dim-label"])
-        .visible(false)
-        .build();
 
     let eta_label = Label::builder()
         .halign(gtk4::Align::End)
@@ -1071,9 +1070,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     eta_label.set_markup(&markup_metadata_secondary(""));
 
     metadata_box.append(&size_label);
-    metadata_box.append(&metadata_separator1);
     metadata_box.append(&speed_label);
-    metadata_box.append(&metadata_separator2);
     metadata_box.append(&eta_label);
 
     info_box.append(&status_box);
@@ -1152,16 +1149,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     row_box.append(&info_box);
     row_box.append(&buttons_box);
 
-    // Adiciona separador visual antes do item (exceto o primeiro)
-    if let Some(_first_child) = list_box.first_child() {
-        let separator = Separator::builder()
-            .orientation(Orientation::Horizontal)
-            .margin_start(16)
-            .margin_end(16)
-            .build();
-        list_box.append(&separator);
-    }
-
+    // Design minimalista - sem separadores entre cards
     list_box.append(&row_box);
 
     // Cria o download task
@@ -1225,8 +1213,6 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let speed_label_clone = speed_label.clone();
     let eta_label_clone = eta_label.clone();
     let parallel_tag_box_clone = parallel_tag_box.clone();
-    let metadata_separator1_clone = metadata_separator1.clone();
-    let metadata_separator2_clone = metadata_separator2.clone();
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
     let open_btn_clone = open_btn.clone();
@@ -1278,10 +1264,6 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     eta_label_clone.set_markup(&markup_metadata_secondary(&eta));
                     parallel_tag_box_clone.set_visible(parallel_chunks);
 
-                    // Mostra separadores apenas quando há conteúdo
-                    metadata_separator1_clone.set_visible(!speed.is_empty());
-                    metadata_separator2_clone.set_visible(!eta.is_empty());
-
                     // Atualiza registro a cada 5 segundos
                     if last_save.elapsed().as_secs() >= 5 {
                         // Verifica se está pausado neste momento
@@ -1316,8 +1298,6 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_label_clone.set_markup(&markup_status("Concluído"));
                     speed_label_clone.set_markup(&markup_metadata_primary(""));
                     eta_label_clone.set_markup(&markup_metadata_secondary(""));
-                    metadata_separator1_clone.set_visible(false);
-                    metadata_separator2_clone.set_visible(false);
 
                     // Esconde botões de controle e mostra botões de arquivo completo
                     pause_btn_clone.set_visible(false);
@@ -1365,8 +1345,6 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_label_clone.set_markup(&markup_status(&format!("Erro: {}", err)));
                     speed_label_clone.set_markup(&markup_metadata_primary(""));
                     eta_label_clone.set_markup(&markup_metadata_secondary(""));
-                    metadata_separator1_clone.set_visible(false);
-                    metadata_separator2_clone.set_visible(false);
                     pause_btn_clone.set_visible(false);
                     cancel_btn_clone.set_visible(false);
                     delete_btn_clone.set_visible(true);
@@ -2230,3 +2208,4 @@ where
         }
     }
 }
+
