@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, CssProvider};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, CssProvider, FileChooserNative, FileChooserAction};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager, MessageDialog, ResponseAppearance};
@@ -82,9 +82,17 @@ enum DownloadStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppConfig {
+    download_directory: Option<String>, // Caminho da pasta de downloads padrão
+    window_width: Option<i32>, // Largura da janela
+    window_height: Option<i32>, // Altura da janela
+}
+
 struct AppState {
     downloads: Vec<Arc<Mutex<DownloadTask>>>,
     records: Arc<Mutex<Vec<DownloadRecord>>>,
+    config: Arc<Mutex<AppConfig>>,
 }
 
 fn main() {
@@ -126,6 +134,67 @@ fn get_data_file_path() -> PathBuf {
     let _ = std::fs::create_dir_all(&data_dir);
 
     data_dir.join("downloads.json")
+}
+
+fn get_config_file_path() -> PathBuf {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("keeper");
+    let _ = std::fs::create_dir_all(&data_dir);
+    data_dir.join("config.json")
+}
+
+fn load_config() -> AppConfig {
+    let file_path = get_config_file_path();
+    if !file_path.exists() {
+        return AppConfig {
+            download_directory: None,
+            window_width: None,
+            window_height: None,
+        };
+    }
+    match std::fs::read_to_string(&file_path) {
+        Ok(contents) => {
+            serde_json::from_str(&contents).unwrap_or_else(|_| AppConfig {
+                download_directory: None,
+                window_width: None,
+                window_height: None,
+            })
+        }
+        Err(_) => AppConfig {
+            download_directory: None,
+            window_width: None,
+            window_height: None,
+        },
+    }
+}
+
+fn save_config(config: &AppConfig) {
+    let file_path = get_config_file_path();
+    match serde_json::to_string_pretty(config) {
+        Ok(json) => {
+            let temp_path = file_path.with_extension("json.tmp");
+            if let Err(e) = std::fs::write(&temp_path, json) {
+                eprintln!("Erro ao escrever arquivo de configuração temporário: {}", e);
+                return;
+            }
+            if let Err(e) = std::fs::rename(&temp_path, &file_path) {
+                eprintln!("Erro ao renomear arquivo de configuração: {}", e);
+                let _ = std::fs::remove_file(&temp_path);
+            }
+        }
+        Err(e) => {
+            eprintln!("Erro ao serializar configuração: {}", e);
+        }
+    }
+}
+
+fn get_download_directory(config: &AppConfig) -> PathBuf {
+    if let Some(ref dir) = config.download_directory {
+        PathBuf::from(dir)
+    } else {
+        dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
+    }
 }
 
 fn load_downloads() -> Vec<DownloadRecord> {
@@ -190,12 +259,15 @@ fn build_ui(app: &Application) {
     let style_manager = StyleManager::default();
     style_manager.set_color_scheme(libadwaita::ColorScheme::ForceDark);
 
-    // Carrega downloads salvos
+    // Carrega downloads salvos e configurações
     let saved_records = load_downloads();
+    let config = load_config();
+    let config_clone = config.clone();
 
     let state = Arc::new(Mutex::new(AppState {
         downloads: Vec::new(),
         records: Arc::new(Mutex::new(saved_records.clone())),
+        config: Arc::new(Mutex::new(config)),
     }));
 
     let window = AdwApplicationWindow::builder()
@@ -204,6 +276,13 @@ fn build_ui(app: &Application) {
         .default_width(700)
         .default_height(500)
         .build();
+
+    // Aplica tamanho salvo se existir
+    if let Some(width) = config_clone.window_width {
+        if let Some(height) = config_clone.window_height {
+            window.set_default_size(width, height);
+        }
+    }
 
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
@@ -215,6 +294,8 @@ fn build_ui(app: &Application) {
         .icon_name("list-add-symbolic")
         .tooltip_text("Adicionar novo download (Ctrl+N)")
         .css_classes(vec!["suggested-action"])
+        .margin_start(8)
+        .margin_end(8)
         .build();
 
     header.pack_end(&add_download_btn);
@@ -227,12 +308,60 @@ fn build_ui(app: &Application) {
 
     let menu = gio::Menu::new();
     menu.append(Some("Mostrar Janela"), Some("app.show"));
+    
+    // Submenu de configurações
+    let config_menu = gio::Menu::new();
+    config_menu.append(Some("Pasta de Downloads"), Some("app.config-downloads"));
+    
+    let config_section = gio::Menu::new();
+    config_section.append_submenu(Some("Configurações"), &config_menu);
+    menu.append_section(None, &config_section);
+    
     menu.append(Some("Sair"), Some("app.quit"));
 
     let popover = PopoverMenu::from_model(Some(&menu));
     menu_button.set_popover(Some(&popover));
 
     header.pack_end(&menu_button);
+
+    // Ação para configurações de pasta de downloads
+    let config_action = gio::SimpleAction::new("config-downloads", None);
+    let window_clone_config = window.clone();
+    let state_clone_config = state.clone();
+    config_action.connect_activate(move |_, _| {
+        let config_window = window_clone_config.clone();
+        let config_state = state_clone_config.clone();
+        
+        // Cria diálogo de seleção de pasta
+        let dialog = FileChooserNative::builder()
+            .title("Selecionar Pasta de Downloads")
+            .action(FileChooserAction::SelectFolder)
+            .transient_for(&config_window)
+            .modal(true)
+            .build();
+        
+        dialog.connect_response(move |dialog, response| {
+            if response == gtk4::ResponseType::Accept {
+                if let Some(file) = dialog.file() {
+                    if let Some(path) = file.path() {
+                        let path_str = path.to_string_lossy().to_string();
+                        
+                        // Atualiza configuração
+                        if let Ok(app_state) = config_state.lock() {
+                            if let Ok(mut config) = app_state.config.lock() {
+                                config.download_directory = Some(path_str.clone());
+                                save_config(&config);
+                            }
+                        }
+                    }
+                }
+            }
+            dialog.destroy();
+        });
+        
+        dialog.show();
+    });
+    app.add_action(&config_action);
 
     main_box.append(&header);
 
@@ -465,6 +594,12 @@ fn build_ui(app: &Application) {
             margin: 0 auto;
         }}
 
+        /* Botão de adicionar no header - margens ajustadas */
+        headerbar button.suggested-action {{
+            margin-start: 8px;
+            margin-end: 8px;
+        }}
+
         /* Card minimalista - sem bordas, sem background */
         .download-card {{
             border: none;
@@ -565,9 +700,78 @@ fn build_ui(app: &Application) {
         gtk4::style_context_add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
     
-    // Configura para não fechar completamente quando clicar no X (minimiza para tray)
-    window.connect_close_request(move |window| {
-        window.set_visible(false);
+    // Salva tamanho da janela periodicamente durante redimensionamento
+    let state_save_size = state.clone();
+    let window_save_size = window.clone();
+    let save_timer_running = Arc::new(Mutex::new(false));
+    
+    {
+        let window_timer = window_save_size.clone();
+        let state_timer = state_save_size.clone();
+        let timer_running = save_timer_running.clone();
+        
+        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            if let Ok(mut running) = timer_running.lock() {
+                if *running {
+                    let (w, h) = window_timer.default_size();
+                    if let Ok(app_state) = state_timer.lock() {
+                        if let Ok(mut config) = app_state.config.lock() {
+                            config.window_width = Some(w);
+                            config.window_height = Some(h);
+                            save_config(&config);
+                        }
+                    }
+                    *running = false;
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+    
+    // Marca que precisa salvar quando a janela for redimensionada
+    // Usa um timer periódico que verifica o tamanho da janela
+    let window_check = window_save_size.clone();
+    let timer_check = save_timer_running.clone();
+    let last_size = Arc::new(Mutex::new((0, 0)));
+    
+    {
+        let window_size_check = window_check.clone();
+        let timer_size_check = timer_check.clone();
+        let last_size_check = last_size.clone();
+        
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            let (w, h) = window_size_check.default_size();
+            let mut changed = false;
+            {
+                if let Ok(mut last) = last_size_check.lock() {
+                    if w != last.0 || h != last.1 {
+                        *last = (w, h);
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                if let Ok(mut running) = timer_size_check.lock() {
+                    *running = true;
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // Salva tamanho quando a janela for fechada/minimizada
+    let state_close = state.clone();
+    let window_close = window.clone();
+    window.connect_close_request(move |_| {
+        let (w, h) = window_close.default_size();
+        if let Ok(app_state) = state_close.lock() {
+            if let Ok(mut config) = app_state.config.lock() {
+                config.window_width = Some(w);
+                config.window_height = Some(h);
+                save_config(&config);
+            }
+        }
+        window_close.set_visible(false);
         glib::Propagation::Stop
     });
     
@@ -838,9 +1042,15 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             }
 
             // Remove arquivo parcial se existir (para começar do zero)
-            let download_dir = std::env::current_dir().unwrap_or_else(|_| {
+            let download_dir = if let Ok(app_state) = state_clone.lock() {
+                if let Ok(config_guard) = app_state.config.lock() {
+                    get_download_directory(&config_guard)
+                } else {
+                    dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
+                }
+            } else {
                 dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
-            });
+            };
             let temp_path = download_dir.join(format!("{}.part", record_filename));
             if temp_path.exists() {
                 let _ = std::fs::remove_file(&temp_path);
@@ -1209,7 +1419,16 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let (msg_tx, msg_rx) = async_channel::unbounded();
 
     // Inicia o download em thread separada
-    start_download(url, &filename, msg_tx, download_task.clone(), state_records.clone());
+    let config_clone = if let Ok(app_state) = state.lock() {
+        app_state.config.clone()
+    } else {
+        Arc::new(Mutex::new(AppConfig {
+            download_directory: None,
+            window_width: None,
+            window_height: None,
+        }))
+    };
+    start_download(url, &filename, msg_tx, download_task.clone(), state_records.clone(), config_clone);
 
     // Monitora mensagens na thread principal do GTK usando spawn_future_local
     let progress_bar_clone = progress_bar.clone();
@@ -1534,9 +1753,15 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
             }
 
             // Remove arquivo parcial se existir (para começar do zero)
-            let download_dir = std::env::current_dir().unwrap_or_else(|_| {
+            let download_dir = if let Ok(app_state) = state_clone_restart.lock() {
+                if let Ok(config_guard) = app_state.config.lock() {
+                    get_download_directory(&config_guard)
+                } else {
+                    dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
+                }
+            } else {
                 dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
-            });
+            };
             let temp_path = download_dir.join(format!("{}.part", filename_clone_restart));
             if temp_path.exists() {
                 let _ = std::fs::remove_file(&temp_path);
@@ -1602,6 +1827,7 @@ fn start_download(
     tx: async_channel::Sender<DownloadMessage>,
     download_task: Arc<Mutex<DownloadTask>>,
     state_records: Arc<Mutex<Vec<DownloadRecord>>>,
+    config: Arc<Mutex<AppConfig>>,
 ) {
     let url = url.to_string();
     let filename = filename.to_string();
@@ -1611,10 +1837,12 @@ fn start_download(
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         rt.block_on(async {
-            // Diretório de download
-            let download_dir = std::env::current_dir().unwrap_or_else(|_| {
+            // Diretório de download usando configuração
+            let download_dir = if let Ok(config_guard) = config.lock() {
+                get_download_directory(&config_guard)
+            } else {
                 dirs::download_dir().unwrap_or_else(|| PathBuf::from("."))
-            });
+            };
 
             let file_path = download_dir.join(&filename);
             let temp_path = download_dir.join(format!("{}.part", filename));
