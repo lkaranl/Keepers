@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, Separator, CssProvider, Image};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager, MessageDialog, ResponseAppearance};
@@ -18,6 +18,33 @@ const DEFAULT_NUM_CHUNKS: u64 = 4; // Número padrão de chunks paralelos
 const MIN_CHUNK_SIZE: u64 = 1024 * 1024; // 1MB - tamanho mínimo por chunk
 const MAX_RETRIES: u32 = 3; // Número máximo de tentativas em caso de erro de conexão
 const RETRY_DELAY_SECS: u64 = 2; // Delay entre tentativas em segundos
+
+// ===== DESIGN TOKENS =====
+// Sistema de espaçamento padronizado
+const SPACING_LARGE: i32 = 16;  // Espaçamento entre seções principais
+const SPACING_MEDIUM: i32 = 12; // Espaçamento entre grupos relacionados
+const SPACING_SMALL: i32 = 8;   // Espaçamento entre elementos próximos
+const SPACING_TINY: i32 = 4;    // Espaçamento mínimo dentro de componentes
+
+// Sistema de border radius
+const RADIUS_LARGE: &str = "12px";   // Cards, badges grandes
+const RADIUS_MEDIUM: &str = "8px";   // Cards principais, containers
+const RADIUS_SMALL: &str = "6px";    // Elementos internos, grupos
+const RADIUS_TINY: &str = "4px";     // Progress bars, elementos pequenos
+
+// Sistema de cores (usando paleta Tailwind para consistência)
+const COLOR_SUCCESS: &str = "#10b981";  // Verde - Downloads concluídos
+const COLOR_INFO: &str = "#3b82f6";     // Azul - Em progresso
+const COLOR_WARNING: &str = "#f59e0b";  // Âmbar - Pausado
+const COLOR_ERROR: &str = "#ef4444";    // Vermelho - Falhas
+const COLOR_NEUTRAL: &str = "#6b7280";  // Cinza - Cancelado
+
+// Sistema de opacidade
+const OPACITY_BADGE_BG: f32 = 0.15;     // Background de badges
+const OPACITY_METADATA_BG: f32 = 0.03;  // Background de metadados
+const OPACITY_CARD_BORDER: f32 = 0.1;   // Bordas de cards
+const OPACITY_DIM_TEXT: f32 = 0.75;     // Texto secundário
+const OPACITY_CANCELLED: f32 = 0.65;    // Items cancelados
 
 #[derive(Clone, Debug)]
 enum DownloadMessage {
@@ -229,7 +256,7 @@ fn build_ui(app: &Application) {
         .orientation(Orientation::Vertical)
         .vexpand(true)
         .valign(gtk4::Align::Center)
-        .spacing(24)
+        .spacing(16)
         .build();
 
     let empty_status = StatusPage::builder()
@@ -411,42 +438,91 @@ fn build_ui(app: &Application) {
 
     window.set_content(Some(&main_box));
     
-    // Adiciona CSS customizado para badges de status
+    // Adiciona CSS customizado usando design tokens
     let provider = CssProvider::new();
-    let css = "
-        .status-badge {
-            border-radius: 12px;
-            padding: 4px 12px;
+    let css = format!("
+        /* ===== DESIGN SYSTEM BASEADO EM TOKENS ===== */
+
+        /* Card elevation para items de download */
+        .download-card {{
+            border: 1px solid alpha(currentColor, {});
+            border-radius: {};
+            background-color: alpha(@window_bg_color, 0.5);
+        }}
+
+        /* Progress bar com altura maior */
+        .download-progress {{
+            min-height: 8px;
+            border-radius: {};
+        }}
+
+        /* Sistema de Badges */
+        .status-badge {{
+            border-radius: {};
+            padding: {}px {}px;
             margin: 0;
-        }
-        
-        .status-badge.completed {
-            background-color: alpha(#10b981, 0.15);
-            color: #10b981;
-        }
-        
-        .status-badge.in-progress {
-            background-color: alpha(#3b82f6, 0.15);
-            color: #3b82f6;
-        }
-        
-        .status-badge.paused {
-            background-color: alpha(#fbbf24, 0.15);
-            color: #fbbf24;
-        }
-        
-        .status-badge.failed {
-            background-color: alpha(#ef4444, 0.15);
-            color: #ef4444;
-        }
-        
-        .status-badge.cancelled {
-            background-color: alpha(#6b7280, 0.15);
-            color: #6b7280;
-        }
-    ";
+        }}
+
+        .status-badge.completed {{
+            background-color: alpha({}, {});
+            color: {};
+        }}
+
+        .status-badge.in-progress {{
+            background-color: alpha({}, {});
+            color: {};
+        }}
+
+        .status-badge.paused {{
+            background-color: alpha({}, {});
+            color: {};
+        }}
+
+        .status-badge.failed {{
+            background-color: alpha({}, {});
+            color: {};
+        }}
+
+        .status-badge.cancelled {{
+            background-color: alpha({}, {});
+            color: {};
+        }}
+
+        /* Grupo de metadados com separação visual */
+        .metadata-group {{
+            padding: {}px {}px;
+            border-radius: {};
+            background-color: alpha(currentColor, {});
+        }}
+
+        /* Melhor contraste para labels secundários */
+        .dim-label {{
+            opacity: {};
+        }}
+
+        /* Downloads cancelados com melhor legibilidade */
+        .cancelled-download {{
+            opacity: {};
+        }}
+    ",
+        OPACITY_CARD_BORDER,
+        RADIUS_MEDIUM,
+        RADIUS_TINY,
+        RADIUS_LARGE,
+        SPACING_TINY, SPACING_MEDIUM,
+        COLOR_SUCCESS, OPACITY_BADGE_BG, COLOR_SUCCESS,
+        COLOR_INFO, OPACITY_BADGE_BG, COLOR_INFO,
+        COLOR_WARNING, OPACITY_BADGE_BG, COLOR_WARNING,
+        COLOR_ERROR, OPACITY_BADGE_BG, COLOR_ERROR,
+        COLOR_NEUTRAL, OPACITY_BADGE_BG, COLOR_NEUTRAL,
+        SPACING_SMALL, SPACING_MEDIUM,
+        RADIUS_SMALL,
+        OPACITY_METADATA_BG,
+        OPACITY_DIM_TEXT,
+        OPACITY_CANCELLED
+    );
     
-    provider.load_from_data(css);
+    provider.load_from_data(&css);
     
     // Adiciona o provider CSS ao display
     if let Some(display) = gtk4::gdk::Display::default() {
@@ -471,18 +547,18 @@ fn build_ui(app: &Application) {
 fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(16)
-        .margin_top(20)
-        .margin_bottom(20)
-        .margin_start(20)
-        .margin_end(20)
+        .spacing(SPACING_LARGE)
+        .margin_top(SPACING_LARGE)
+        .margin_bottom(SPACING_LARGE)
+        .margin_start(SPACING_LARGE)
+        .margin_end(SPACING_LARGE)
+        .css_classes(vec!["download-card"])
         .build();
 
     // Se estiver cancelado, aplica estilo especial (opaco)
     let is_cancelled = record.status == DownloadStatus::Cancelled;
     if is_cancelled {
         row_box.add_css_class("cancelled-download");
-        row_box.set_opacity(0.5);
     }
 
     // Header com título - tipografia melhorada
@@ -490,20 +566,14 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .halign(gtk4::Align::Start)
         .hexpand(true)
         .css_classes(vec!["title-2"])
-        .ellipsize(gtk4::pango::EllipsizeMode::Middle)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
         .build();
 
     // Se cancelado, adiciona risco no meio do texto usando Pango markup
     if is_cancelled {
-        title_label.set_markup(&format!(
-            "<s><span weight='bold' size='large'>{}</span></s>",
-            glib::markup_escape_text(&record.filename)
-        ));
+        title_label.set_markup(&markup_title_strikethrough(&record.filename));
     } else {
-        title_label.set_markup(&format!(
-            "<span weight='bold' size='large'>{}</span>",
-            glib::markup_escape_text(&record.filename)
-        ));
+        title_label.set_markup(&markup_title(&record.filename));
     }
 
     // Barra de progresso
@@ -521,6 +591,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .show_text(true)
         .fraction(fraction)
         .text(&text)
+        .css_classes(vec!["download-progress"])
         .build();
 
     // Se cancelado, aplica estilo especial na barra de progresso
@@ -528,37 +599,37 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         progress_bar.add_css_class("cancelled-progress");
     }
 
-    // Box de status
+    // Box de status e metadados
     let info_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(16)
+        .spacing(SPACING_MEDIUM)
         .build();
 
     // Box para status com badge colorido
     let status_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(8)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::Start)
         .hexpand(true)
         .build();
 
-    let (status_text, status_icon) = match record.status {
+    let (status_text, status_icon_name) = match record.status {
         DownloadStatus::InProgress => {
             if record.was_paused {
-                ("Pausado", "⏸")
+                ("Pausado", Some("media-playback-pause-symbolic"))
             } else {
-                ("Em progresso", "⬇")
+                ("Em progresso", Some("folder-download-symbolic"))
             }
         }
-        DownloadStatus::Completed => ("Concluído", "✓"),
-        DownloadStatus::Failed => ("Falhou", "✕"),
-        DownloadStatus::Cancelled => ("Cancelado", "⊘"),
+        DownloadStatus::Completed => ("Concluído", Some("emblem-ok-symbolic")),
+        DownloadStatus::Failed => ("Falhou", Some("dialog-error-symbolic")),
+        DownloadStatus::Cancelled => ("Cancelado", Some("process-stop-symbolic")),
     };
 
     // Badge colorido para status
     let status_badge = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(6)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::Start)
         .css_classes(vec!["status-badge"])
         .build();
@@ -578,77 +649,86 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     };
     status_badge.add_css_class(badge_class);
 
-    // Ícone de status
-    let status_icon_label = Label::builder()
-        .halign(gtk4::Align::Start)
-        .css_classes(vec!["caption"])
-        .build();
-
-    status_icon_label.set_markup(&format!(
-        "<span size='large' weight='bold'>{}</span>",
-        status_icon
-    ));
+    // Ícone de status (GTK symbolic)
+    if let Some(icon_name) = status_icon_name {
+        let status_icon = gtk4::Image::builder()
+            .icon_name(icon_name)
+            .pixel_size(16)
+            .build();
+        status_badge.append(&status_icon);
+    }
 
     // Texto de status
     let status_label = Label::builder()
         .halign(gtk4::Align::Start)
-        .css_classes(vec!["caption"])
         .build();
-    
-    status_label.set_markup(&format!(
-        "<span weight='medium'>{}</span>",
-        glib::markup_escape_text(status_text)
-    ));
 
-    status_badge.append(&status_icon_label);
+    status_label.set_markup(&markup_status(status_text));
+
     status_badge.append(&status_label);
     status_box.append(&status_badge);
 
-    // Box para metadados (tamanho e data)
+    // Box para metadados (tamanho e data) - layout horizontal
     let metadata_box = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(4)
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_MEDIUM)
         .halign(gtk4::Align::End)
+        .css_classes(vec!["metadata-group"])
         .build();
 
     // Label para tamanho do arquivo
     let size_label = Label::builder()
         .halign(gtk4::Align::End)
-        .css_classes(vec!["caption"])
         .build();
-    
+
     let size_text = if record.total_bytes > 0 {
         format_file_size(record.total_bytes)
     } else {
         "Desconhecido".to_string()
     };
-    size_label.set_markup(&format!(
-        "<span weight='600' size='small'>{}</span>",
-        glib::markup_escape_text(&size_text)
-    ));
+    size_label.set_markup(&markup_metadata_primary(&size_text));
+
+    // Separador visual
+    let metadata_separator = Label::builder()
+        .label("•")
+        .css_classes(vec!["dim-label"])
+        .build();
 
     let date_label = Label::builder()
         .halign(gtk4::Align::End)
-        .css_classes(vec!["caption", "dim-label"])
+        .css_classes(vec!["dim-label"])
         .build();
-    
+
     // Data em tamanho menor e peso normal
     let date_text = format!("{}", record.date_added.format("%d/%m/%Y %H:%M"));
-    date_label.set_markup(&format!(
-        "<span size='small'>{}</span>",
-        glib::markup_escape_text(&date_text)
-    ));
+    date_label.set_markup(&markup_metadata_secondary(&date_text));
 
     metadata_box.append(&size_label);
+    metadata_box.append(&metadata_separator);
     metadata_box.append(&date_label);
 
     info_box.append(&status_box);
     info_box.append(&metadata_box);
 
-    // Box de botões
+    // Box de botões - mantém estrutura consistente em todos os estados
     let buttons_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(12)
+        .spacing(SPACING_MEDIUM)
+        .halign(gtk4::Align::End)
+        .build();
+
+    // Container para botões de ação primária (à esquerda)
+    let primary_actions_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_SMALL)
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .build();
+
+    // Container para botões destrutivos (à direita)
+    let destructive_actions_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::End)
         .build();
 
@@ -690,7 +770,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             add_download(&list_box_clone, &record_url, &state_clone);
         });
 
-        buttons_box.append(&resume_btn);
+        primary_actions_box.append(&resume_btn);
     }
 
     // Botão de reiniciar (apenas para downloads cancelados)
@@ -741,7 +821,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             add_download(&list_box_clone, &record_url, &state_clone);
         });
 
-        buttons_box.append(&restart_btn);
+        primary_actions_box.append(&restart_btn);
     }
 
     // Botão de abrir (apenas para completados)
@@ -758,8 +838,8 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             }
         });
 
-        buttons_box.append(&open_btn);
-        
+        primary_actions_box.append(&open_btn);
+
         // Botão de abrir explorador de arquivos
         let open_folder_btn = Button::builder()
             .icon_name("folder-open-symbolic")
@@ -776,7 +856,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             }
         });
 
-        buttons_box.append(&open_folder_btn);
+        primary_actions_box.append(&open_folder_btn);
     }
 
     // Botão de excluir
@@ -821,7 +901,11 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         }
     });
 
-    buttons_box.append(&delete_btn);
+    destructive_actions_box.append(&delete_btn);
+
+    // Monta a estrutura de botões de forma consistente
+    buttons_box.append(&primary_actions_box);
+    buttons_box.append(&destructive_actions_box);
 
     row_box.append(&title_label);
     row_box.append(&progress_bar);
@@ -844,11 +928,12 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
 fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(16)
-        .margin_top(20)
-        .margin_bottom(20)
-        .margin_start(20)
-        .margin_end(20)
+        .spacing(SPACING_LARGE)
+        .margin_top(SPACING_LARGE)
+        .margin_bottom(SPACING_LARGE)
+        .margin_start(SPACING_LARGE)
+        .margin_end(SPACING_LARGE)
+        .css_classes(vec!["download-card"])
         .build();
 
     let filename = url.split('/').last().unwrap_or("download").to_string();
@@ -856,7 +941,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Header com título e tag de chunks paralelos
     let title_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(12)
+        .spacing(SPACING_MEDIUM)
         .halign(gtk4::Align::Start)
         .build();
 
@@ -864,47 +949,54 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .halign(gtk4::Align::Start)
         .hexpand(true)
         .css_classes(vec!["title-2"])
-        .ellipsize(gtk4::pango::EllipsizeMode::Middle)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
         .build();
-    
+
     // Título com peso bold e tamanho large
-    title_label.set_markup(&format!(
-        "<span weight='bold' size='large'>{}</span>",
-        glib::markup_escape_text(&filename)
-    ));
+    title_label.set_markup(&markup_title(&filename));
 
     // Tag de chunks paralelos (inicialmente escondida)
-    let parallel_tag = Label::builder()
-        .label("⚡ Chunks Paralelos")
+    let parallel_tag_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_TINY)
         .halign(gtk4::Align::Start)
-        .css_classes(vec!["caption", "dim-label"])
         .visible(false)
         .tooltip_text("Download otimizado: arquivo baixado em múltiplas partes simultâneas")
         .build();
 
-    // Adiciona estilo para destacar a tag
-    let ctx = parallel_tag.style_context();
-    ctx.add_class("tag");
+    let parallel_icon = gtk4::Image::builder()
+        .icon_name("network-transmit-receive-symbolic")
+        .pixel_size(12)
+        .build();
+
+    let parallel_label = Label::builder()
+        .label("Chunks Paralelos")
+        .css_classes(vec!["caption", "dim-label"])
+        .build();
+
+    parallel_tag_box.append(&parallel_icon);
+    parallel_tag_box.append(&parallel_label);
 
     title_box.append(&title_label);
-    title_box.append(&parallel_tag);
+    title_box.append(&parallel_tag_box);
 
     // Barra de progresso
     let progress_bar = gtk4::ProgressBar::builder()
         .hexpand(true)
         .show_text(true)
+        .css_classes(vec!["download-progress"])
         .build();
 
     // Box de status e velocidade
     let info_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(16)
+        .spacing(SPACING_MEDIUM)
         .build();
 
     // Box para status com badge colorido
     let status_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(8)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::Start)
         .hexpand(true)
         .build();
@@ -912,81 +1004,100 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Badge colorido para status (inicialmente azul para "em progresso")
     let status_badge = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(6)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::Start)
         .css_classes(vec!["status-badge", "in-progress"])
         .build();
 
-    // Ícone de status
-    let status_icon_label = Label::builder()
-        .halign(gtk4::Align::Start)
-        .css_classes(vec!["caption"])
+    // Ícone de status (GTK symbolic)
+    let status_icon = gtk4::Image::builder()
+        .icon_name("folder-download-symbolic")
+        .pixel_size(16)
         .build();
-    
-    status_icon_label.set_markup("<span size='large' weight='bold'>⬇</span>");
 
     // Texto de status
     let status_label = Label::builder()
         .halign(gtk4::Align::Start)
-        .css_classes(vec!["caption"])
         .build();
-    
-    status_label.set_markup("<span weight='medium'>Iniciando...</span>");
 
-    status_badge.append(&status_icon_label);
+    status_label.set_markup(&markup_status("Iniciando..."));
+
+    status_badge.append(&status_icon);
     status_badge.append(&status_label);
     status_box.append(&status_badge);
 
-    // Box para metadados (tamanho, velocidade e ETA)
+    // Box para metadados (tamanho, velocidade e ETA) - layout horizontal
     let metadata_box = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(4)
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_MEDIUM)
         .halign(gtk4::Align::End)
+        .css_classes(vec!["metadata-group"])
         .build();
 
     // Label para tamanho do arquivo (inicialmente vazio, será atualizado quando disponível)
     let size_label = Label::builder()
         .halign(gtk4::Align::End)
-        .css_classes(vec!["caption"])
         .build();
-    
-    size_label.set_markup("<span weight='600' size='small'></span>");
 
-    let speed_eta_box = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(4)
-        .halign(gtk4::Align::End)
+    size_label.set_markup(&markup_metadata_primary(""));
+
+    // Separador visual entre tamanho e velocidade
+    let metadata_separator1 = Label::builder()
+        .label("•")
+        .css_classes(vec!["dim-label"])
+        .visible(false)
         .build();
 
     let speed_label = Label::builder()
         .halign(gtk4::Align::End)
-        .css_classes(vec!["caption"])
         .build();
-    
+
     // Velocidade com peso semibold para destaque (inicialmente vazio)
-    speed_label.set_markup("<span weight='600'></span>");
+    speed_label.set_markup(&markup_metadata_primary(""));
+
+    // Separador visual entre velocidade e ETA
+    let metadata_separator2 = Label::builder()
+        .label("•")
+        .css_classes(vec!["dim-label"])
+        .visible(false)
+        .build();
 
     let eta_label = Label::builder()
         .halign(gtk4::Align::End)
-        .css_classes(vec!["caption", "dim-label"])
+        .css_classes(vec!["dim-label"])
         .build();
-    
-    // ETA em tamanho small e peso normal (inicialmente vazio)
-    eta_label.set_markup("<span size='small'></span>");
 
-    speed_eta_box.append(&speed_label);
-    speed_eta_box.append(&eta_label);
+    // ETA em tamanho small e peso normal (inicialmente vazio)
+    eta_label.set_markup(&markup_metadata_secondary(""));
 
     metadata_box.append(&size_label);
-    metadata_box.append(&speed_eta_box);
+    metadata_box.append(&metadata_separator1);
+    metadata_box.append(&speed_label);
+    metadata_box.append(&metadata_separator2);
+    metadata_box.append(&eta_label);
 
     info_box.append(&status_box);
     info_box.append(&metadata_box);
 
-    // Box de botões de ação
+    // Box de botões de ação - mantém estrutura consistente
     let buttons_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
-        .spacing(12)
+        .spacing(SPACING_MEDIUM)
+        .halign(gtk4::Align::End)
+        .build();
+
+    // Container para botões de ação primária (à esquerda)
+    let primary_actions_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_SMALL)
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .build();
+
+    // Container para botões destrutivos (à direita)
+    let destructive_actions_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_SMALL)
         .halign(gtk4::Align::End)
         .build();
 
@@ -1025,11 +1136,16 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         .css_classes(vec!["destructive-action"])
         .build();
 
-    buttons_box.append(&open_btn);
-    buttons_box.append(&open_folder_btn);
-    buttons_box.append(&pause_btn);
-    buttons_box.append(&cancel_btn);
-    buttons_box.append(&delete_btn);
+    // Organiza botões de forma consistente
+    primary_actions_box.append(&open_btn);
+    primary_actions_box.append(&open_folder_btn);
+    primary_actions_box.append(&pause_btn);
+
+    destructive_actions_box.append(&cancel_btn);
+    destructive_actions_box.append(&delete_btn);
+
+    buttons_box.append(&primary_actions_box);
+    buttons_box.append(&destructive_actions_box);
 
     row_box.append(&title_box);
     row_box.append(&progress_bar);
@@ -1103,12 +1219,14 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     // Monitora mensagens na thread principal do GTK usando spawn_future_local
     let progress_bar_clone = progress_bar.clone();
     let status_badge_clone = status_badge.clone();
-    let status_icon_label_clone = status_icon_label.clone();
+    let status_icon_clone = status_icon.clone();
     let status_label_clone = status_label.clone();
     let size_label_clone = size_label.clone();
     let speed_label_clone = speed_label.clone();
     let eta_label_clone = eta_label.clone();
-    let parallel_tag_clone = parallel_tag.clone();
+    let parallel_tag_box_clone = parallel_tag_box.clone();
+    let metadata_separator1_clone = metadata_separator1.clone();
+    let metadata_separator2_clone = metadata_separator2.clone();
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
     let open_btn_clone = open_btn.clone();
@@ -1132,23 +1250,20 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                         if let Some(record) = records.iter().find(|r| r.url == record_url_clone) {
                             if record.total_bytes > 0 {
                                 let size_text = format_file_size(record.total_bytes);
-                                size_label_clone.set_markup(&format!(
-                                    "<span weight='600' size='small'>{}</span>",
-                                    glib::markup_escape_text(&size_text)
-                                ));
+                                size_label_clone.set_markup(&markup_metadata_primary(&size_text));
                             }
                         }
                     }
                     
                     // Atualiza ícone de status e badge baseado no status_text
-                    let (icon, badge_class) = if status_text.contains("Pausado") || status_text.contains("Pausar") {
-                        ("⏸", "paused")
+                    let (icon_name, badge_class) = if status_text.contains("Pausado") || status_text.contains("Pausar") {
+                        ("media-playback-pause-symbolic", "paused")
                     } else if status_text.contains("Erro") || status_text.contains("Falha") {
-                        ("✕", "failed")
+                        ("dialog-error-symbolic", "failed")
                     } else {
-                        ("⬇", "in-progress")
+                        ("folder-download-symbolic", "in-progress")
                     };
-                    
+
                     // Atualiza classe CSS do badge
                     status_badge_clone.remove_css_class("completed");
                     status_badge_clone.remove_css_class("in-progress");
@@ -1156,27 +1271,16 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_badge_clone.remove_css_class("failed");
                     status_badge_clone.remove_css_class("cancelled");
                     status_badge_clone.add_css_class(badge_class);
-                    
-                    status_icon_label_clone.set_markup(&format!(
-                        "<span size='large' weight='bold'>{}</span>",
-                        icon
-                    ));
-                    // Status com peso medium
-                    status_label_clone.set_markup(&format!(
-                        "<span weight='medium'>{}</span>",
-                        glib::markup_escape_text(&status_text)
-                    ));
-                    // Velocidade com peso semibold
-                    speed_label_clone.set_markup(&format!(
-                        "<span weight='600'>{}</span>",
-                        glib::markup_escape_text(&speed)
-                    ));
-                    // ETA em tamanho small
-                    eta_label_clone.set_markup(&format!(
-                        "<span size='small'>{}</span>",
-                        glib::markup_escape_text(&eta)
-                    ));
-                    parallel_tag_clone.set_visible(parallel_chunks);
+
+                    status_icon_clone.set_icon_name(Some(icon_name));
+                    status_label_clone.set_markup(&markup_status(&status_text));
+                    speed_label_clone.set_markup(&markup_metadata_primary(&speed));
+                    eta_label_clone.set_markup(&markup_metadata_secondary(&eta));
+                    parallel_tag_box_clone.set_visible(parallel_chunks);
+
+                    // Mostra separadores apenas quando há conteúdo
+                    metadata_separator1_clone.set_visible(!speed.is_empty());
+                    metadata_separator2_clone.set_visible(!eta.is_empty());
 
                     // Atualiza registro a cada 5 segundos
                     if last_save.elapsed().as_secs() >= 5 {
@@ -1206,12 +1310,14 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_badge_clone.remove_css_class("failed");
                     status_badge_clone.remove_css_class("cancelled");
                     status_badge_clone.add_css_class("completed");
-                    
+
                     // Ícone verde para completo
-                    status_icon_label_clone.set_markup("<span size='large' weight='bold'>✓</span>");
-                    status_label_clone.set_markup("<span weight='medium'>Concluído</span>");
-                    speed_label_clone.set_markup("<span weight='600'>✓</span>");
-                    eta_label_clone.set_markup("<span size='small'></span>");
+                    status_icon_clone.set_icon_name(Some("emblem-ok-symbolic"));
+                    status_label_clone.set_markup(&markup_status("Concluído"));
+                    speed_label_clone.set_markup(&markup_metadata_primary(""));
+                    eta_label_clone.set_markup(&markup_metadata_secondary(""));
+                    metadata_separator1_clone.set_visible(false);
+                    metadata_separator2_clone.set_visible(false);
 
                     // Esconde botões de controle e mostra botões de arquivo completo
                     pause_btn_clone.set_visible(false);
@@ -1241,12 +1347,12 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 }
                 DownloadMessage::Error(err) => {
                     // Atualiza ícone de status e badge baseado no tipo de erro
-                    let (icon, badge_class, status) = if err.contains("Cancelado") {
-                        ("⊘", "cancelled", DownloadStatus::Cancelled) // cinza
+                    let (icon_name, badge_class, status) = if err.contains("Cancelado") {
+                        ("process-stop-symbolic", "cancelled", DownloadStatus::Cancelled) // cinza
                     } else {
-                        ("✕", "failed", DownloadStatus::Failed) // vermelho
+                        ("dialog-error-symbolic", "failed", DownloadStatus::Failed) // vermelho
                     };
-                    
+
                     // Atualiza classe CSS do badge
                     status_badge_clone.remove_css_class("completed");
                     status_badge_clone.remove_css_class("in-progress");
@@ -1254,17 +1360,13 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_badge_clone.remove_css_class("failed");
                     status_badge_clone.remove_css_class("cancelled");
                     status_badge_clone.add_css_class(badge_class);
-                    
-                    status_icon_label_clone.set_markup(&format!(
-                        "<span size='large' weight='bold'>{}</span>",
-                        icon
-                    ));
-                    status_label_clone.set_markup(&format!(
-                        "<span weight='medium'>Erro: {}</span>",
-                        glib::markup_escape_text(&err)
-                    ));
-                    speed_label_clone.set_markup("<span weight='600'></span>");
-                    eta_label_clone.set_markup("<span size='small'></span>");
+
+                    status_icon_clone.set_icon_name(Some(icon_name));
+                    status_label_clone.set_markup(&markup_status(&format!("Erro: {}", err)));
+                    speed_label_clone.set_markup(&markup_metadata_primary(""));
+                    eta_label_clone.set_markup(&markup_metadata_secondary(""));
+                    metadata_separator1_clone.set_visible(false);
+                    metadata_separator2_clone.set_visible(false);
                     pause_btn_clone.set_visible(false);
                     cancel_btn_clone.set_visible(false);
                     delete_btn_clone.set_visible(true);
@@ -1318,7 +1420,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let state_records_clone4 = state_records.clone();
     let record_url_clone4 = record_url.clone();
     let status_badge_clone_pause = status_badge.clone();
-    let status_icon_label_clone_pause = status_icon_label.clone();
+    let status_icon_clone_pause = status_icon.clone();
     let status_label_clone_pause = status_label.clone();
 
     pause_btn.connect_clicked(move |btn| {
@@ -1329,23 +1431,23 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
             if is_paused {
                 btn.set_icon_name("media-playback-start-symbolic");
                 btn.set_tooltip_text(Some("Retomar"));
-                
+
                 // Atualiza UI para pausado
                 status_badge_clone_pause.remove_css_class("in-progress");
                 status_badge_clone_pause.remove_css_class("paused");
                 status_badge_clone_pause.add_css_class("paused");
-                status_icon_label_clone_pause.set_markup("<span size='large' weight='bold'>⏸</span>");
-                status_label_clone_pause.set_markup("<span weight='medium'>Pausado</span>");
+                status_icon_clone_pause.set_icon_name(Some("media-playback-pause-symbolic"));
+                status_label_clone_pause.set_markup(&markup_status("Pausado"));
             } else {
                 btn.set_icon_name("media-playback-pause-symbolic");
                 btn.set_tooltip_text(Some("Pausar"));
-                
+
                 // Atualiza UI para em progresso
                 status_badge_clone_pause.remove_css_class("paused");
                 status_badge_clone_pause.remove_css_class("in-progress");
                 status_badge_clone_pause.add_css_class("in-progress");
-                status_icon_label_clone_pause.set_markup("<span size='large' weight='bold'>⬇</span>");
-                status_label_clone_pause.set_markup("<span weight='medium'>Em progresso</span>");
+                status_icon_clone_pause.set_icon_name(Some("folder-download-symbolic"));
+                status_label_clone_pause.set_markup(&markup_status("Em progresso"));
             }
 
             // Atualiza was_paused no registro
@@ -1394,12 +1496,11 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         }
 
         // Atualiza a UI para mostrar como cancelado (não remove da tela)
-        // Aplica opacidade no container
+        // Aplica opacidade no container (melhor legibilidade)
         row_box_clone_cancel.add_css_class("cancelled-download");
-        row_box_clone_cancel.set_opacity(0.5);
 
-        // Adiciona risco no texto do título
-        title_label_clone_cancel.set_markup(&format!("<s>{}</s>", glib::markup_escape_text(&filename_clone_cancel)));
+        // Mantém título normal, sem strikethrough (melhor legibilidade)
+        title_label_clone_cancel.set_markup(&markup_title(&filename_clone_cancel));
 
         // Atualiza barra de progresso
         progress_bar_clone_cancel.add_css_class("cancelled-progress");
@@ -1410,11 +1511,11 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         status_badge_clone_cancel.remove_css_class("failed");
         status_badge_clone_cancel.remove_css_class("completed");
         status_badge_clone_cancel.add_css_class("cancelled");
-        
+
         // Atualiza status
-        status_label_clone_cancel.set_markup("<span weight='medium'>Cancelado</span>");
-        speed_label_clone_cancel.set_markup("<span weight='600'></span>");
-        eta_label_clone_cancel.set_markup("<span size='small'></span>");
+        status_label_clone_cancel.set_markup(&markup_status("Cancelado"));
+        speed_label_clone_cancel.set_markup(&markup_metadata_primary(""));
+        eta_label_clone_cancel.set_markup(&markup_metadata_secondary(""));
 
         // Adiciona botão de reiniciar
         let restart_btn = Button::builder()
@@ -1464,7 +1565,13 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         pause_btn_clone_cancel.set_visible(false);
         cancel_btn_clone_cancel.set_visible(false);
         delete_btn_clone_cancel.set_visible(true);
-        buttons_box_clone_cancel.prepend(&restart_btn);
+
+        // Adiciona restart_btn no container de primary actions
+        if let Some(first_child) = buttons_box_clone_cancel.first_child() {
+            if let Some(primary_box) = first_child.downcast_ref::<GtkBox>() {
+                primary_box.prepend(&restart_btn);
+            }
+        }
     });
 
     // Handler para botão de excluir
@@ -2038,6 +2145,44 @@ fn format_eta(seconds: f64) -> String {
     } else {
         "< 1s".to_string()
     }
+}
+
+// Funções auxiliares para markup Pango padronizado
+fn markup_title(text: &str) -> String {
+    format!(
+        "<span weight='bold' size='large'>{}</span>",
+        glib::markup_escape_text(text)
+    )
+}
+
+fn markup_title_strikethrough(text: &str) -> String {
+    format!(
+        "<s><span weight='bold' size='large'>{}</span></s>",
+        glib::markup_escape_text(text)
+    )
+}
+
+fn markup_status(text: &str) -> String {
+    format!(
+        "<span weight='600'>{}</span>",
+        glib::markup_escape_text(text)
+    )
+}
+
+// Removida: markup_status_icon - agora usa gtk4::Image com ícones simbólicos
+
+fn markup_metadata_primary(text: &str) -> String {
+    format!(
+        "<span weight='600'>{}</span>",
+        glib::markup_escape_text(text)
+    )
+}
+
+fn markup_metadata_secondary(text: &str) -> String {
+    format!(
+        "<span size='small' weight='normal'>{}</span>",
+        glib::markup_escape_text(text)
+    )
 }
 
 // Função auxiliar para verificar se um erro é recuperável (timeout, conexão)
