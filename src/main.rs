@@ -461,6 +461,8 @@ fn build_ui(app: &Application) {
         /* Cor de fundo da lista de downloads com classe boxed-list */
         .boxed-list {{
             background-color: transparent;
+            max-width: 90%;
+            margin: 0 auto;
         }}
 
         /* Card minimalista - sem bordas, sem background */
@@ -469,6 +471,11 @@ fn build_ui(app: &Application) {
             border-radius: 10px;
             background-color: alpha(currentColor, 0.08);
             padding: 10px;
+            /* Tamanho do card - reduzido e centralizado */
+            max-width: 600px;
+            width: 100%;
+            margin: 0 auto;
+            min-width: 280px;
         }}
 
         /* Progress bar minimalista */
