@@ -316,13 +316,15 @@ fn build_ui(app: &Application) {
             dialog.add_response("cancel", "Cancelar");
             dialog.add_response("download", "Baixar");
             dialog.set_response_appearance("download", ResponseAppearance::Suggested);
-            dialog.set_default_response(Some("download"));
             dialog.set_close_response("cancel");
+            
+            // Desabilita botão "Baixar" inicialmente (antes de conectar signals)
+            dialog.set_response_enabled("download", false);
 
             // Campo de entrada de URL dentro da modal
             let url_entry = Entry::builder()
                 .placeholder_text("https://exemplo.com/arquivo.zip")
-                .activates_default(true)
+                .activates_default(false)
                 .build();
 
             // Container para o entry com margens adequadas
@@ -338,7 +340,7 @@ fn build_ui(app: &Application) {
             entry_box.append(&url_entry);
             dialog.set_extra_child(Some(&entry_box));
 
-            // Desabilita botão "Baixar" inicialmente se o campo estiver vazio
+            // Conecta validação em tempo real
             let dialog_clone = dialog.clone();
             url_entry.connect_changed(move |entry| {
                 let url = entry.text().to_string().trim().to_string();
@@ -347,10 +349,16 @@ fn build_ui(app: &Application) {
                 // Valida se tem conteúdo e começa com http:// ou https://
                 let is_valid = !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://"));
                 dialog_clone.set_response_enabled("download", is_valid);
+                // Define resposta padrão apenas se válido (para permitir Enter)
+                if is_valid {
+                    dialog_clone.set_default_response(Some("download"));
+                    // Reativa o activates_default quando válido
+                    entry.set_activates_default(true);
+                } else {
+                    dialog_clone.set_default_response(None);
+                    entry.set_activates_default(false);
+                }
             });
-
-            // Desabilita inicialmente o botão "Baixar"
-            dialog.set_response_enabled("download", false);
 
             // Clones necessários para o callback
             let list_box_dialog = list_box_clone.clone();
