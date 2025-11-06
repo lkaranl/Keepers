@@ -466,36 +466,54 @@ fn build_ui(app: &Application) {
             let dialog = MessageDialog::builder()
                 .transient_for(&window_clone)
                 .heading("Adicionar Download")
-                .body("Cole o link do arquivo que você deseja baixar:")
+                .body("Insira a URL completa do arquivo que deseja baixar")
                 .build();
 
             // Adiciona botões de ação
             dialog.add_response("cancel", "Cancelar");
-            dialog.add_response("download", "Baixar");
+            dialog.add_response("download", "Iniciar Download");
             dialog.set_response_appearance("download", ResponseAppearance::Suggested);
             dialog.set_close_response("cancel");
-            
-            // Desabilita botão "Baixar" inicialmente (antes de conectar signals)
+
+            // Desabilita botão "Baixar" inicialmente
             dialog.set_response_enabled("download", false);
 
-            // Campo de entrada de URL dentro da modal
+            // Container principal com melhor espaçamento
+            let main_box = GtkBox::builder()
+                .orientation(Orientation::Vertical)
+                .spacing(12)
+                .margin_top(12)
+                .margin_bottom(12)
+                .margin_start(16)
+                .margin_end(16)
+                .build();
+
+            // Label descritivo
+            let label = Label::builder()
+                .label("URL do arquivo")
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["title-4"])
+                .build();
+
+            // Campo de entrada de URL com tamanho melhor
             let url_entry = Entry::builder()
                 .placeholder_text("https://exemplo.com/arquivo.zip")
                 .activates_default(false)
+                .width_request(450)
                 .build();
 
-            // Container para o entry com margens adequadas
-            let entry_box = GtkBox::builder()
-                .orientation(Orientation::Vertical)
-                .spacing(8)
-                .margin_top(8)
-                .margin_bottom(8)
-                .margin_start(8)
-                .margin_end(8)
+            // Texto de ajuda
+            let help_label = Label::builder()
+                .label("O download iniciará automaticamente após adicionar")
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["dim-label", "caption"])
                 .build();
 
-            entry_box.append(&url_entry);
-            dialog.set_extra_child(Some(&entry_box));
+            main_box.append(&label);
+            main_box.append(&url_entry);
+            main_box.append(&help_label);
+
+            dialog.set_extra_child(Some(&main_box));
 
             // Conecta validação em tempo real
             let dialog_clone = dialog.clone();
@@ -521,11 +539,12 @@ fn build_ui(app: &Application) {
             let list_box_dialog = list_box_clone.clone();
             let content_stack_dialog = content_stack_clone.clone();
             let state_dialog = state_clone.clone();
+            let url_entry_response = url_entry.clone();
 
             // Conecta resposta da modal
             dialog.connect_response(None, move |dialog, response| {
                 if response == "download" {
-                    let url = url_entry.text().to_string().trim().to_string();
+                    let url = url_entry_response.text().to_string().trim().to_string();
                     // Valida se tem conteúdo e começa com http:// ou https://
                     if !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://")) {
                         add_download(&list_box_dialog, &url, &state_dialog, &content_stack_dialog);
@@ -533,12 +552,15 @@ fn build_ui(app: &Application) {
                         dialog.close();
                     } else {
                         // Se não for válido, não fecha a modal e mostra feedback visual
-                        url_entry.add_css_class("error");
+                        url_entry_response.add_css_class("error");
                     }
                 } else {
                     dialog.close();
                 }
             });
+
+            // Foca automaticamente no campo de entrada quando a modal abre
+            url_entry.grab_focus();
 
             dialog.present();
         }
@@ -721,6 +743,19 @@ fn build_ui(app: &Application) {
         .cancelled-download {{
             opacity: {};
         }}
+
+        /* Melhorias para modais de entrada */
+        messagedialog entry {{
+            min-height: 40px;
+            font-size: 14px;
+            padding: 8px 12px;
+        }}
+
+        /* Estado de erro no campo */
+        entry.error {{
+            border-color: {};
+            background-color: alpha({}, 0.1);
+        }}
     ",
         RADIUS_LARGE,
         // Cores da barra de progresso por status
@@ -737,7 +772,10 @@ fn build_ui(app: &Application) {
         COLOR_NEUTRAL,        // cancelled badge
         // Opacidades
         OPACITY_DIM_TEXT,
-        OPACITY_CANCELLED
+        OPACITY_CANCELLED,
+        // Estado de erro
+        COLOR_ERROR,          // border-color do erro
+        COLOR_ERROR           // background-color do erro
     );
     
     provider.load_from_data(&css);
