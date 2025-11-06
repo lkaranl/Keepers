@@ -28,9 +28,6 @@ const SPACING_TINY: i32 = 2;    // Espaçamento mínimo dentro de componentes
 
 // Sistema de border radius (ultra minimalista)
 const RADIUS_LARGE: &str = "6px";   // Cards, badges grandes
-const RADIUS_MEDIUM: &str = "4px";   // Cards principais, containers
-const RADIUS_SMALL: &str = "3px";    // Elementos internos, grupos
-const RADIUS_TINY: &str = "2px";     // Progress bars, elementos pequenos
 
 // Sistema de cores (usando paleta Tailwind para consistência)
 const COLOR_SUCCESS: &str = "#10b981";  // Verde - Downloads concluídos
@@ -40,9 +37,6 @@ const COLOR_ERROR: &str = "#ef4444";    // Vermelho - Falhas
 const COLOR_NEUTRAL: &str = "#6b7280";  // Cinza - Cancelado
 
 // Sistema de opacidade
-const OPACITY_BADGE_BG: f32 = 0.15;     // Background de badges
-const OPACITY_METADATA_BG: f32 = 0.03;  // Background de metadados
-const OPACITY_CARD_BORDER: f32 = 0.1;   // Bordas de cards
 const OPACITY_DIM_TEXT: f32 = 0.75;     // Texto secundário
 const OPACITY_CANCELLED: f32 = 0.65;    // Items cancelados
 
@@ -294,8 +288,8 @@ fn build_ui(app: &Application) {
         .icon_name("list-add-symbolic")
         .tooltip_text("Adicionar novo download (Ctrl+N)")
         .css_classes(vec!["suggested-action"])
-        .margin_start(8)
-        .margin_end(8)
+        .margin_start(SPACING_LARGE)
+        .margin_end(SPACING_LARGE)
         .build();
 
     header.pack_end(&add_download_btn);
@@ -368,9 +362,9 @@ fn build_ui(app: &Application) {
     let scrolled = ScrolledWindow::builder()
         .hexpand(true)
         .vexpand(true)
-        .margin_start(8)
-        .margin_end(8)
-        .margin_bottom(8)
+        .margin_start(SPACING_LARGE)
+        .margin_end(SPACING_LARGE)
+        .margin_bottom(SPACING_LARGE)
         .build();
 
     let list_box = ListBox::builder()
@@ -572,11 +566,6 @@ fn build_ui(app: &Application) {
     let css = format!("
         /* ===== DESIGN SYSTEM BASEADO EM TOKENS ===== */
 
-        /* Cor de fundo da janela principal - transparente */
-        // window {{
-        //     background-color: transparent;
-        // }}
-
         /* Cor de fundo do container principal (ScrolledWindow) */
         scrolledwindow {{
             background-color: transparent;
@@ -590,27 +579,20 @@ fn build_ui(app: &Application) {
         /* Cor de fundo da lista de downloads com classe boxed-list */
         .boxed-list {{
             background-color: transparent;
-            max-width: 90%;
-            margin: 0 auto;
         }}
 
         /* Botão de adicionar no header - margens ajustadas */
         headerbar button.suggested-action {{
-            margin-start: 8px;
-            margin-end: 8px;
+            margin-left: 8px;
+            margin-right: 8px;
         }}
 
         /* Card minimalista - sem bordas, sem background */
         .download-card {{
             border: none;
-            border-radius: 10px;
+            border-radius: {};
             background-color: alpha(currentColor, 0.08);
             padding: 10px;
-            /* Tamanho do card - reduzido e centralizado */
-            max-width: 600px;
-            width: 100%;
-            margin: 0 auto;
-            min-width: 280px;
         }}
 
         /* Progress bar minimalista */
@@ -680,6 +662,7 @@ fn build_ui(app: &Application) {
             opacity: {};
         }}
     ",
+        RADIUS_LARGE,
         COLOR_INFO,
         COLOR_INFO,
         COLOR_NEUTRAL,
