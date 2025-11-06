@@ -425,7 +425,7 @@ fn build_ui(app: &Application) {
                 to_resume.push(record.url.clone());
             } else {
                 // Caso contrário, mostra como download completo/pausado/falhado/cancelado
-                add_completed_download(&list_box, &record, &state);
+                add_completed_download(&list_box, &record, &state, &content_stack);
             }
         }
 
@@ -443,7 +443,7 @@ fn build_ui(app: &Application) {
 
         // Retoma downloads ativos
         for url in to_resume {
-            add_download(&list_box, &url, &state);
+            add_download(&list_box, &url, &state, &content_stack);
         }
     }
 
@@ -521,7 +521,7 @@ fn build_ui(app: &Application) {
                     let url = url_entry.text().to_string().trim().to_string();
                     // Valida se tem conteúdo e começa com http:// ou https://
                     if !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://")) {
-                        add_download(&list_box_dialog, &url, &state_dialog);
+                        add_download(&list_box_dialog, &url, &state_dialog, &content_stack_dialog);
                         content_stack_dialog.set_visible_child_name("list");
                         dialog.close();
                     } else {
@@ -824,7 +824,7 @@ fn build_ui(app: &Application) {
     // Por enquanto, o menu no header funciona como alternativa
 }
 
-fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &Arc<Mutex<AppState>>) {
+fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &Arc<Mutex<AppState>>, content_stack: &gtk4::Stack) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(SPACING_MEDIUM)
@@ -1027,6 +1027,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         let row_box_clone = row_box.clone();
         let list_box_clone = list_box.clone();
         let state_clone = state.clone();
+        let content_stack_clone = content_stack.clone();
         let state_records = if let Ok(st) = state.lock() {
             st.records.clone()
         } else {
@@ -1050,7 +1051,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             }
 
             // Reinicia o download (vai usar o arquivo .part existente)
-            add_download(&list_box_clone, &record_url, &state_clone);
+            add_download(&list_box_clone, &record_url, &state_clone, &content_stack_clone);
         });
 
         primary_actions_box.append(&resume_btn);
@@ -1069,6 +1070,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         let row_box_clone = row_box.clone();
         let list_box_clone = list_box.clone();
         let state_clone = state.clone();
+        let content_stack_clone = content_stack.clone();
         let state_records = if let Ok(st) = state.lock() {
             st.records.clone()
         } else {
@@ -1107,7 +1109,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
             }
 
             // Inicia novo download do zero
-            add_download(&list_box_clone, &record_url, &state_clone);
+            add_download(&list_box_clone, &record_url, &state_clone, &content_stack_clone);
         });
 
         primary_actions_box.append(&restart_btn);
@@ -1158,32 +1160,41 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     let row_box_clone = row_box.clone();
     let record_url = record.url.clone();
     let state_clone = state.clone();
+    let content_stack_clone = content_stack.clone();
 
     delete_btn.connect_clicked(move |_| {
         // Remove do state.records e do arquivo de dados PRIMEIRO
         let mut should_remove_ui = true;
+        let mut is_empty = false;
         if let Ok(app_state) = state_clone.lock() {
             if let Ok(mut records) = app_state.records.lock() {
                 let before_count = records.len();
                 records.retain(|r| r.url != record_url);
                 let after_count = records.len();
-                
+
                 if before_count != after_count {
                     // Salvou com sucesso, agora remove da UI
                     save_downloads(&records);
+                    // Verifica se ficou vazio
+                    is_empty = after_count == 0;
                 } else {
                     // Não encontrou o registro, pode já ter sido removido
                     should_remove_ui = false;
                 }
             }
         }
-        
+
         // Remove da UI
         if should_remove_ui {
             if let Some(parent) = row_box_clone.parent() {
                 if let Some(grandparent) = parent.parent() {
                     if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
                         list_box.remove(&parent);
+
+                        // Se a lista ficou vazia, mostra o estado vazio
+                        if is_empty {
+                            content_stack_clone.set_visible_child_name("empty");
+                        }
                     }
                 }
             }
@@ -1205,7 +1216,7 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
     list_box.append(&row_box);
 }
 
-fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
+fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, content_stack: &gtk4::Stack) {
     let row_box = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(SPACING_MEDIUM)
@@ -1814,6 +1825,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let buttons_box_clone_cancel = buttons_box.clone();
     let list_box_clone_cancel = list_box.clone();
     let filename_clone_cancel = filename.clone();
+    let content_stack_clone_cancel = content_stack.clone();
 
     cancel_btn.connect_clicked(move |_| {
         // Cancela o download
@@ -1870,6 +1882,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         let list_box_clone_restart = list_box_clone_cancel.clone();
         let state_clone_restart = state_clone_cancel.clone();
         let filename_clone_restart = filename_clone_cancel.clone();
+        let content_stack_clone_restart = content_stack_clone_cancel.clone();
 
         restart_btn.connect_clicked(move |_| {
             // Remove da UI
@@ -1905,7 +1918,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
             }
 
             // Inicia novo download do zero
-            add_download(&list_box_clone_restart, &record_url_clone_restart, &state_clone_restart);
+            add_download(&list_box_clone_restart, &record_url_clone_restart, &state_clone_restart, &content_stack_clone_restart);
         });
 
         // Esconde botões de controle e mostra botão de reiniciar e excluir
@@ -1925,32 +1938,41 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let row_box_clone_delete = row_box.clone();
     let state_clone_delete = state.clone();
     let record_url_clone3 = record_url.clone();
+    let content_stack_clone_delete = content_stack.clone();
 
     delete_btn.connect_clicked(move |_| {
         // Remove do state.records e salva no arquivo PRIMEIRO
         let mut should_remove_ui = true;
+        let mut is_empty = false;
         if let Ok(app_state) = state_clone_delete.lock() {
             if let Ok(mut records) = app_state.records.lock() {
                 let before_count = records.len();
                 records.retain(|r| r.url != record_url_clone3);
                 let after_count = records.len();
-                
+
                 if before_count != after_count {
                     // Salvou com sucesso, agora remove da UI
                     save_downloads(&records);
+                    // Verifica se ficou vazio
+                    is_empty = after_count == 0;
                 } else {
                     // Não encontrou o registro, pode já ter sido removido
                     should_remove_ui = false;
                 }
             }
         }
-        
+
         // Remove da UI
         if should_remove_ui {
             if let Some(parent) = row_box_clone_delete.parent() {
                 if let Some(grandparent) = parent.parent() {
                     if let Some(list_box) = grandparent.downcast_ref::<ListBox>() {
                         list_box.remove(&parent);
+
+                        // Se a lista ficou vazia, mostra o estado vazio
+                        if is_empty {
+                            content_stack_clone_delete.set_visible_child_name("empty");
+                        }
                     }
                 }
             }
