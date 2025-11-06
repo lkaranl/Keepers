@@ -339,7 +339,7 @@ fn build_ui(app: &Application) {
                 if let Some(file) = dialog.file() {
                     if let Some(path) = file.path() {
                         let path_str = path.to_string_lossy().to_string();
-                        
+
                         // Atualiza configuração
                         if let Ok(app_state) = config_state.lock() {
                             if let Ok(mut config) = app_state.config.lock() {
@@ -350,7 +350,7 @@ fn build_ui(app: &Application) {
                     }
                 }
             }
-            dialog.destroy();
+            // FileChooserNative se auto-gerencia, não precisa de destroy() manual
         });
         
         dialog.show();
