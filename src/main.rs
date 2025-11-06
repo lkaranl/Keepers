@@ -595,26 +595,79 @@ fn build_ui(app: &Application) {
             padding: 10px;
         }}
 
-        /* Progress bar minimalista */
+        /* Progress bar visível e moderna - altura aumentada */
         .download-progress {{
-            min-height: 4px;
-            border-radius: 0;
+            min-height: 20px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
         }}
-        
+
         .download-progress trough {{
-            background-color: alpha(currentColor, 0.08);
-            border-radius: 0;
+            background-color: alpha(currentColor, 0.1);
+            border-radius: 6px;
+            min-height: 20px;
         }}
-        
-        .download-progress progress {{
-            background-color: {};
-            color: {};
-            border-radius: 0;
+
+        /* Texto da porcentagem sempre visível e contrastante */
+        .download-progress text {{
+            color: @window_fg_color;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.5);
         }}
-        
-        .download-progress.cancelled-progress progress {{
-            background-color: {};
-            color: {};
+
+        /* Barra de progresso - Em Progresso (Azul) */
+        .download-progress.in-progress trough progress {{
+            background: {};
+            min-height: 20px;
+            border-radius: 6px;
+        }}
+
+        .download-progress.in-progress text {{
+            color: white;
+        }}
+
+        /* Barra de progresso - Pausado (Amarelo/Âmbar) */
+        .download-progress.paused trough progress {{
+            background: {};
+            min-height: 20px;
+            border-radius: 6px;
+        }}
+
+        .download-progress.paused text {{
+            color: rgba(0, 0, 0, 0.9);
+        }}
+
+        /* Barra de progresso - Completo (Verde) */
+        .download-progress.completed trough progress {{
+            background: {};
+            min-height: 20px;
+            border-radius: 6px;
+        }}
+
+        .download-progress.completed text {{
+            color: white;
+        }}
+
+        /* Barra de progresso - Cancelado (Cinza) */
+        .download-progress.cancelled trough progress {{
+            background: {};
+            min-height: 20px;
+            border-radius: 6px;
+        }}
+
+        .download-progress.cancelled text {{
+            color: white;
+        }}
+
+        /* Barra de progresso - Falhou (Vermelho) */
+        .download-progress.failed trough progress {{
+            background: {};
+            min-height: 20px;
+            border-radius: 6px;
+        }}
+
+        .download-progress.failed text {{
+            color: white;
         }}
 
         /* Badges minimalistas - sem background, apenas cor de texto */
@@ -663,15 +716,19 @@ fn build_ui(app: &Application) {
         }}
     ",
         RADIUS_LARGE,
-        COLOR_INFO,
-        COLOR_INFO,
-        COLOR_NEUTRAL,
-        COLOR_NEUTRAL,
-        COLOR_SUCCESS,
-        COLOR_INFO,
-        COLOR_WARNING,
-        COLOR_ERROR,
-        COLOR_NEUTRAL,
+        // Cores da barra de progresso por status
+        COLOR_INFO,           // in-progress (azul)
+        COLOR_WARNING,        // paused (amarelo/âmbar)
+        COLOR_SUCCESS,        // completed (verde)
+        COLOR_NEUTRAL,        // cancelled (cinza)
+        COLOR_ERROR,          // failed (vermelho)
+        // Cores dos badges de status
+        COLOR_SUCCESS,        // completed badge
+        COLOR_INFO,           // in-progress badge
+        COLOR_WARNING,        // paused badge
+        COLOR_ERROR,          // failed badge
+        COLOR_NEUTRAL,        // cancelled badge
+        // Opacidades
         OPACITY_DIM_TEXT,
         OPACITY_CANCELLED
     );
@@ -817,10 +874,20 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         .css_classes(vec!["download-progress"])
         .build();
 
-    // Se cancelado, aplica estilo especial na barra de progresso
-    if is_cancelled {
-        progress_bar.add_css_class("cancelled-progress");
-    }
+    // Aplica classe CSS baseada no status
+    let progress_status_class = match record.status {
+        DownloadStatus::Completed => "completed",
+        DownloadStatus::InProgress => {
+            if record.was_paused {
+                "paused"
+            } else {
+                "in-progress"
+            }
+        }
+        DownloadStatus::Failed => "failed",
+        DownloadStatus::Cancelled => "cancelled",
+    };
+    progress_bar.add_css_class(progress_status_class);
 
     // Box de status e metadados
     let info_box = GtkBox::builder()
@@ -1197,7 +1264,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let progress_bar = gtk4::ProgressBar::builder()
         .hexpand(true)
         .show_text(true)
-        .css_classes(vec!["download-progress"])
+        .css_classes(vec!["download-progress", "in-progress"])
         .build();
 
     // Box de status e velocidade
@@ -1467,6 +1534,14 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_badge_clone.remove_css_class("cancelled");
                     status_badge_clone.add_css_class(badge_class);
 
+                    // Atualiza classe CSS da barra de progresso
+                    progress_bar_clone.remove_css_class("completed");
+                    progress_bar_clone.remove_css_class("in-progress");
+                    progress_bar_clone.remove_css_class("paused");
+                    progress_bar_clone.remove_css_class("failed");
+                    progress_bar_clone.remove_css_class("cancelled");
+                    progress_bar_clone.add_css_class(badge_class);
+
                     status_icon_clone.set_icon_name(Some(icon_name));
                     status_label_clone.set_markup(&markup_status(&status_text));
                     speed_label_clone.set_markup(&markup_metadata_primary(&speed));
@@ -1501,6 +1576,13 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_badge_clone.remove_css_class("failed");
                     status_badge_clone.remove_css_class("cancelled");
                     status_badge_clone.add_css_class("completed");
+
+                    // Atualiza barra de progresso para completo (verde)
+                    progress_bar_clone.remove_css_class("in-progress");
+                    progress_bar_clone.remove_css_class("paused");
+                    progress_bar_clone.remove_css_class("failed");
+                    progress_bar_clone.remove_css_class("cancelled");
+                    progress_bar_clone.add_css_class("completed");
 
                     // Ícone verde para completo
                     status_icon_clone.set_icon_name(Some("emblem-ok-symbolic"));
@@ -1549,6 +1631,14 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_badge_clone.remove_css_class("failed");
                     status_badge_clone.remove_css_class("cancelled");
                     status_badge_clone.add_css_class(badge_class);
+
+                    // Atualiza classe CSS da barra de progresso
+                    progress_bar_clone.remove_css_class("completed");
+                    progress_bar_clone.remove_css_class("in-progress");
+                    progress_bar_clone.remove_css_class("paused");
+                    progress_bar_clone.remove_css_class("failed");
+                    progress_bar_clone.remove_css_class("cancelled");
+                    progress_bar_clone.add_css_class(badge_class);
 
                     status_icon_clone.set_icon_name(Some(icon_name));
                     status_label_clone.set_markup(&markup_status(&format!("Erro: {}", err)));
@@ -1609,6 +1699,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let status_badge_clone_pause = status_badge.clone();
     let status_icon_clone_pause = status_icon.clone();
     let status_label_clone_pause = status_label.clone();
+    let progress_bar_clone_pause = progress_bar.clone();
 
     pause_btn.connect_clicked(move |btn| {
         if let Ok(mut task) = download_task_clone.lock() {
@@ -1625,6 +1716,11 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 status_badge_clone_pause.add_css_class("paused");
                 status_icon_clone_pause.set_icon_name(Some("media-playback-pause-symbolic"));
                 status_label_clone_pause.set_markup(&markup_status("Pausado"));
+
+                // Atualiza barra de progresso para pausado
+                progress_bar_clone_pause.remove_css_class("in-progress");
+                progress_bar_clone_pause.remove_css_class("paused");
+                progress_bar_clone_pause.add_css_class("paused");
             } else {
                 btn.set_icon_name("media-playback-pause-symbolic");
                 btn.set_tooltip_text(Some("Pausar"));
@@ -1635,6 +1731,11 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                 status_badge_clone_pause.add_css_class("in-progress");
                 status_icon_clone_pause.set_icon_name(Some("folder-download-symbolic"));
                 status_label_clone_pause.set_markup(&markup_status("Em progresso"));
+
+                // Atualiza barra de progresso para em progresso
+                progress_bar_clone_pause.remove_css_class("paused");
+                progress_bar_clone_pause.remove_css_class("in-progress");
+                progress_bar_clone_pause.add_css_class("in-progress");
             }
 
             // Atualiza was_paused no registro
@@ -1689,8 +1790,12 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
         // Mantém título normal, sem strikethrough (melhor legibilidade)
         title_label_clone_cancel.set_markup(&markup_title(&filename_clone_cancel));
 
-        // Atualiza barra de progresso
-        progress_bar_clone_cancel.add_css_class("cancelled-progress");
+        // Atualiza barra de progresso para cancelado
+        progress_bar_clone_cancel.remove_css_class("in-progress");
+        progress_bar_clone_cancel.remove_css_class("paused");
+        progress_bar_clone_cancel.remove_css_class("failed");
+        progress_bar_clone_cancel.remove_css_class("completed");
+        progress_bar_clone_cancel.add_css_class("cancelled");
 
         // Atualiza badge para cancelado (cinza)
         status_badge_clone_cancel.remove_css_class("in-progress");
