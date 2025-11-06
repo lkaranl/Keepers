@@ -1257,8 +1257,31 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     parallel_tag_box.append(&parallel_icon);
     parallel_tag_box.append(&parallel_label);
 
+    // Tag de retomando download (inicialmente escondida)
+    let resume_tag_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_TINY)
+        .halign(gtk4::Align::Start)
+        .visible(false)
+        .tooltip_text("Continuando download de onde parou")
+        .build();
+
+    let resume_icon = gtk4::Image::builder()
+        .icon_name("media-skip-forward-symbolic")
+        .pixel_size(12)
+        .build();
+
+    let resume_label = Label::builder()
+        .label("Retomando")
+        .css_classes(vec!["caption", "dim-label"])
+        .build();
+
+    resume_tag_box.append(&resume_icon);
+    resume_tag_box.append(&resume_label);
+
     title_box.append(&title_label);
     title_box.append(&parallel_tag_box);
+    title_box.append(&resume_tag_box);
 
     // Barra de progresso
     let progress_bar = gtk4::ProgressBar::builder()
@@ -1489,6 +1512,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
     let speed_label_clone = speed_label.clone();
     let eta_label_clone = eta_label.clone();
     let parallel_tag_box_clone = parallel_tag_box.clone();
+    let resume_tag_box_clone = resume_tag_box.clone();
     let pause_btn_clone = pause_btn.clone();
     let cancel_btn_clone = cancel_btn.clone();
     let open_btn_clone = open_btn.clone();
@@ -1546,7 +1570,27 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                     status_label_clone.set_markup(&markup_status(&status_text));
                     speed_label_clone.set_markup(&markup_metadata_primary(&speed));
                     eta_label_clone.set_markup(&markup_metadata_secondary(&eta));
-                    parallel_tag_box_clone.set_visible(parallel_chunks);
+
+                    // Mostra tag apropriada baseado no modo de download
+                    if parallel_chunks {
+                        // Download em chunks paralelos
+                        parallel_tag_box_clone.set_visible(true);
+                        resume_tag_box_clone.set_visible(false);
+                    } else {
+                        // Verifica se é um resume (tem bytes já baixados)
+                        let is_resuming = if let Ok(records) = state_records_clone.lock() {
+                            if let Some(record) = records.iter().find(|r| r.url == record_url_clone) {
+                                record.downloaded_bytes > 0
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        parallel_tag_box_clone.set_visible(false);
+                        resume_tag_box_clone.set_visible(is_resuming);
+                    }
 
                     // Atualiza registro a cada 5 segundos
                     if last_save.elapsed().as_secs() >= 5 {
@@ -1560,6 +1604,10 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                         if let Ok(mut records) = state_records_clone.lock() {
                             if let Some(record) = records.iter_mut().find(|r| r.url == record_url_clone) {
                                 record.was_paused = is_currently_paused;
+                                // Atualiza downloaded_bytes baseado no progresso
+                                if record.total_bytes > 0 {
+                                    record.downloaded_bytes = (progress * record.total_bytes as f64) as u64;
+                                }
                             }
                             save_downloads(&records);
                         }
@@ -1610,6 +1658,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>) {
                             record.status = DownloadStatus::Completed;
                             record.file_path = file_path_str;
                             record.date_completed = Some(Utc::now());
+                            record.downloaded_bytes = record.total_bytes; // Marca como 100% completo
                         }
                         save_downloads(&records);
                     }
@@ -1979,8 +2028,12 @@ fn start_download(
                 }
             }
 
-            // Se não suporta Range ou tamanho desconhecido, usa download sequencial
-            if !supports_range || total_size == 0 || total_size < 1024 * 1024 {
+            // Verifica se já existe arquivo .part (download pausado/interrompido)
+            let is_resume = temp_path.exists();
+
+            // Se não suporta Range, tamanho desconhecido, arquivo pequeno ou é resume, usa download sequencial
+            // Motivo: download sequencial tem suporte completo a resume, download paralelo não
+            if !supports_range || total_size == 0 || total_size < 1024 * 1024 || is_resume {
                 // Download sequencial (código original)
                 download_sequential(&client, &url, &temp_path, &file_path, total_size, &tx, &download_task, false).await;
                 return;
@@ -2213,7 +2266,7 @@ async fn download_chunk(
                 };
                 let speed_text = format_speed(speed_bytes);
 
-                let eta_text = if total_size > 0 && speed_bytes > 0.0 {
+                let eta_text = if total_size > 0 && speed_bytes > 0.0 && total_downloaded < total_size {
                     let remaining_bytes = total_size - total_downloaded;
                     let eta_seconds = remaining_bytes as f64 / speed_bytes;
                     format_eta(eta_seconds)
@@ -2289,6 +2342,13 @@ async fn download_sequential(
     let mut last_update = Instant::now();
     let mut last_downloaded = downloaded;
 
+    // Envia progresso inicial se estiver retomando
+    if downloaded > 0 && total_size > 0 {
+        let progress = downloaded as f64 / total_size as f64;
+        let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
+        let _ = tx.send(DownloadMessage::Progress(progress, status, String::new(), String::new(), parallel_chunks)).await;
+    }
+
     while let Some(chunk_result) = stream.next().await {
         // Verifica se foi cancelado ou está pausado
         loop {
@@ -2342,7 +2402,7 @@ async fn download_sequential(
             let speed_text = format_speed(speed_bytes);
 
             // Calcula ETA (tempo restante estimado)
-            let eta_text = if total_size > 0 && speed_bytes > 0.0 {
+            let eta_text = if total_size > 0 && speed_bytes > 0.0 && downloaded < total_size {
                 let remaining_bytes = total_size - downloaded;
                 let eta_seconds = remaining_bytes as f64 / speed_bytes;
                 format_eta(eta_seconds)
