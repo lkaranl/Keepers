@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, CssProvider, FileChooserNative, FileChooserAction};
+use gtk4::{prelude::*, Application, Box as GtkBox, Button, Entry, Label, ListBox, Orientation, ScrolledWindow, MenuButton, PopoverMenu, CssProvider, FileChooserDialog, FileChooserAction};
 use gtk4::glib;
 use gtk4::gio;
 use libadwaita::{prelude::*, ApplicationWindow as AdwApplicationWindow, HeaderBar, StatusPage, StyleManager, MessageDialog, ResponseAppearance};
@@ -325,34 +325,41 @@ fn build_ui(app: &Application) {
     config_action.connect_activate(move |_, _| {
         let config_window = window_clone_config.clone();
         let config_state = state_clone_config.clone();
-        
+
         // Cria diálogo de seleção de pasta
-        let dialog = FileChooserNative::builder()
-            .title("Selecionar Pasta de Downloads")
-            .action(FileChooserAction::SelectFolder)
-            .transient_for(&config_window)
-            .modal(true)
-            .build();
-        
+        let dialog = FileChooserDialog::new(
+            Some("Selecionar Pasta de Downloads"),
+            Some(&config_window),
+            FileChooserAction::SelectFolder,
+            &[("Cancelar", gtk4::ResponseType::Cancel), ("Selecionar", gtk4::ResponseType::Accept)],
+        );
+
+        dialog.set_modal(true);
+
+        // Conecta a resposta
+        let config_state_response = config_state.clone();
         dialog.connect_response(move |dialog, response| {
             if response == gtk4::ResponseType::Accept {
                 if let Some(file) = dialog.file() {
                     if let Some(path) = file.path() {
                         let path_str = path.to_string_lossy().to_string();
 
+                        println!("Pasta selecionada: {}", path_str);
+
                         // Atualiza configuração
-                        if let Ok(app_state) = config_state.lock() {
+                        if let Ok(app_state) = config_state_response.lock() {
                             if let Ok(mut config) = app_state.config.lock() {
                                 config.download_directory = Some(path_str.clone());
                                 save_config(&config);
+                                println!("Configuração salva com sucesso!");
                             }
                         }
                     }
                 }
             }
-            // FileChooserNative se auto-gerencia, não precisa de destroy() manual
+            dialog.close();
         });
-        
+
         dialog.show();
     });
     app.add_action(&config_action);
