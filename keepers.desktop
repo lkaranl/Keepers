@@ -1,9 +1,9 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=DownStream
-Comment=Gerenciador de downloads leve e persistente
-Exec=/home/karan/Documentos/GitHub/Keepers/target/release/downstream
+Name=Keepers
+Comment=Gerenciador de downloads
+Exec=/home/karan/Documentos/GitHub/Keepers/target/release/keepers
 Icon=folder-download-symbolic
 Terminal=false
 Categories=Network;FileTransfer;

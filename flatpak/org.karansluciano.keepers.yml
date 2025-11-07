@@ -1,0 +1,26 @@
+app-id: org.karansluciano.keepers
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: keepers
+
+finish-args:
+  - --share=network
+  - --filesystem=xdg-download
+  - --socket=wayland
+  - --socket=fallback-x11
+
+modules:
+  - name: keepers
+    buildsystem: cargo
+    sources:
+      # --- MUDANÇA AQUI ---
+      # Trocamos 'generated-sources' por 'file',
+      # apontando para o arquivo que você criou.
+      - type: file
+        path: cargo-sources.json
+      # --- FIM DA MUDANÇA ---
+
+      # Este é o código-fonte do seu app
+      - type: dir
+        path: ..
