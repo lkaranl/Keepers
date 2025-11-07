@@ -297,6 +297,148 @@ fn build_ui(app: &Application) {
 
     header.pack_end(&add_download_btn);
 
+    // Box para badges de atividade
+    let badges_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .margin_end(12)
+        .build();
+
+    // Badge de downloads ativos (em progresso)
+    let active_badge_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(4)
+        .css_classes(vec!["badge-container", "active"])
+        .visible(false)
+        .build();
+
+    let active_icon = gtk4::Image::builder()
+        .icon_name("folder-download-symbolic")
+        .pixel_size(16)
+        .build();
+
+    let active_label = Label::builder()
+        .css_classes(vec!["badge-label"])
+        .build();
+
+    active_badge_box.append(&active_icon);
+    active_badge_box.append(&active_label);
+
+    // Badge de downloads pausados
+    let paused_badge_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(4)
+        .css_classes(vec!["badge-container", "paused"])
+        .visible(false)
+        .build();
+
+    let paused_icon = gtk4::Image::builder()
+        .icon_name("media-playback-pause-symbolic")
+        .pixel_size(16)
+        .build();
+
+    let paused_label = Label::builder()
+        .css_classes(vec!["badge-label"])
+        .build();
+
+    paused_badge_box.append(&paused_icon);
+    paused_badge_box.append(&paused_label);
+
+    // Badge de downloads com erro
+    let error_badge_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(4)
+        .css_classes(vec!["badge-container", "error"])
+        .visible(false)
+        .build();
+
+    let error_icon = gtk4::Image::builder()
+        .icon_name("dialog-error-symbolic")
+        .pixel_size(16)
+        .build();
+
+    let error_label = Label::builder()
+        .css_classes(vec!["badge-label"])
+        .build();
+
+    error_badge_box.append(&error_icon);
+    error_badge_box.append(&error_label);
+
+    badges_box.append(&active_badge_box);
+    badges_box.append(&paused_badge_box);
+    badges_box.append(&error_badge_box);
+
+    header.pack_start(&badges_box);
+
+    // Função para atualizar badges
+    let update_badges = {
+        let state_badges = state.clone();
+        let active_badge_box_update = active_badge_box.clone();
+        let paused_badge_box_update = paused_badge_box.clone();
+        let error_badge_box_update = error_badge_box.clone();
+        let active_label_update = active_label.clone();
+        let paused_label_update = paused_label.clone();
+        let error_label_update = error_label.clone();
+
+        move || {
+            if let Ok(app_state) = state_badges.lock() {
+                if let Ok(records) = app_state.records.lock() {
+                    // Conta downloads por status
+                    let active_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::InProgress && !r.was_paused
+                    ).count();
+
+                    let paused_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::InProgress && r.was_paused
+                    ).count();
+
+                    let error_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::Failed || r.status == DownloadStatus::Cancelled
+                    ).count();
+
+                    // Atualiza badge de ativos
+                    if active_count > 0 {
+                        active_label_update.set_text(&active_count.to_string());
+                        active_badge_box_update.set_tooltip_text(Some(&format!("{} download(s) ativo(s)", active_count)));
+                        active_badge_box_update.set_visible(true);
+                    } else {
+                        active_badge_box_update.set_visible(false);
+                    }
+
+                    // Atualiza badge de pausados
+                    if paused_count > 0 {
+                        paused_label_update.set_text(&paused_count.to_string());
+                        paused_badge_box_update.set_tooltip_text(Some(&format!("{} download(s) pausado(s)", paused_count)));
+                        paused_badge_box_update.set_visible(true);
+                    } else {
+                        paused_badge_box_update.set_visible(false);
+                    }
+
+                    // Atualiza badge de erros
+                    if error_count > 0 {
+                        error_label_update.set_text(&error_count.to_string());
+                        error_badge_box_update.set_tooltip_text(Some(&format!("{} download(s) com erro/cancelado(s)", error_count)));
+                        error_badge_box_update.set_visible(true);
+                    } else {
+                        error_badge_box_update.set_visible(false);
+                    }
+                }
+            }
+        }
+    };
+
+    // Atualiza badges inicialmente
+    update_badges();
+
+    // Atualiza badges a cada 2 segundos
+    glib::timeout_add_seconds_local(2, {
+        let update_fn = update_badges.clone();
+        move || {
+            update_fn();
+            glib::ControlFlow::Continue
+        }
+    });
+
     // Adiciona menu button no header para system tray
     let menu_button = MenuButton::builder()
         .icon_name("open-menu-symbolic")
@@ -971,6 +1113,54 @@ fn build_ui(app: &Application) {
             border-color: {};
             background-color: alpha({}, 0.1);
         }}
+
+        /* ===== BADGES DE ATIVIDADE NO HEADER ===== */
+
+        /* Container do badge - estilo pill moderno */
+        .badge-container {{
+            background-color: alpha(currentColor, 0.08);
+            border-radius: 12px;
+            padding: 4px 10px;
+            margin-left: 4px;
+            margin-right: 4px;
+        }}
+
+        /* Badge de downloads ativos - azul */
+        .badge-container.active {{
+            background-color: alpha({}, 0.15);
+        }}
+
+        .badge-container.active .badge-label {{
+            color: {};
+            font-weight: 700;
+        }}
+
+        /* Badge de downloads pausados - amarelo/âmbar */
+        .badge-container.paused {{
+            background-color: alpha({}, 0.15);
+        }}
+
+        .badge-container.paused .badge-label {{
+            color: {};
+            font-weight: 700;
+        }}
+
+        /* Badge de downloads com erro - vermelho */
+        .badge-container.error {{
+            background-color: alpha({}, 0.15);
+        }}
+
+        .badge-container.error .badge-label {{
+            color: {};
+            font-weight: 700;
+        }}
+
+        /* Label do badge - tipografia */
+        .badge-label {{
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }}
     ",
         RADIUS_LARGE,
         // Cores da barra de progresso por status
@@ -990,7 +1180,14 @@ fn build_ui(app: &Application) {
         OPACITY_CANCELLED,
         // Estado de erro
         COLOR_ERROR,          // border-color do erro
-        COLOR_ERROR           // background-color do erro
+        COLOR_ERROR,          // background-color do erro
+        // Badges de atividade no header
+        COLOR_INFO,           // active badge background
+        COLOR_INFO,           // active badge text
+        COLOR_WARNING,        // paused badge background
+        COLOR_WARNING,        // paused badge text
+        COLOR_ERROR,          // error badge background
+        COLOR_ERROR           // error badge text
     );
     
     provider.load_from_data(&css);
