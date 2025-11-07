@@ -28,6 +28,7 @@ const SPACING_TINY: i32 = 2;    // Espaçamento mínimo dentro de componentes
 
 // Sistema de border radius (ultra minimalista)
 const RADIUS_LARGE: &str = "6px";   // Cards, badges grandes
+const RADIUS_MEDIUM: &str = "4px";  // Componentes médios
 
 // Sistema de cores (usando paleta Tailwind para consistência)
 const COLOR_SUCCESS: &str = "#10b981";  // Verde - Downloads concluídos
@@ -578,7 +579,235 @@ fn build_ui(app: &Application) {
         .css_classes(vec!["boxed-list"])
         .build();
 
-    scrolled.set_child(Some(&list_box));
+    // Container principal para incluir painel de métricas + lista
+    let list_container = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(SPACING_MEDIUM)
+        .build();
+
+    // Painel de métricas fixo no topo
+    let metrics_panel = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .css_classes(vec!["metrics-panel"])
+        .margin_top(SPACING_MEDIUM)
+        .build();
+
+    // Título do painel
+    let metrics_title = Label::builder()
+        .label("Resumo Geral")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["title-4"])
+        .build();
+
+    // Grid para organizar as métricas em colunas
+    let metrics_grid = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(SPACING_LARGE)
+        .homogeneous(true)
+        .margin_top(SPACING_SMALL)
+        .margin_bottom(SPACING_SMALL)
+        .build();
+
+    // Métrica: Downloads por Status
+    let status_metrics_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .css_classes(vec!["metric-card"])
+        .build();
+
+    let status_metrics_title = Label::builder()
+        .label("Downloads")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption-heading", "dim-label"])
+        .build();
+
+    let status_metrics_value = Label::builder()
+        .label("0 total")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["title-2", "metric-value"])
+        .build();
+
+    let status_metrics_details = Label::builder()
+        .label("0 ativos • 0 pausados • 0 erros")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption", "dim-label"])
+        .wrap(true)
+        .build();
+
+    status_metrics_box.append(&status_metrics_title);
+    status_metrics_box.append(&status_metrics_value);
+    status_metrics_box.append(&status_metrics_details);
+
+    // Métrica: Velocidade Agregada
+    let speed_metrics_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .css_classes(vec!["metric-card"])
+        .build();
+
+    let speed_metrics_title = Label::builder()
+        .label("Velocidade")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption-heading", "dim-label"])
+        .build();
+
+    let speed_metrics_value = Label::builder()
+        .label("0 B/s")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["title-2", "metric-value"])
+        .build();
+
+    let speed_metrics_details = Label::builder()
+        .label("Nenhum download ativo")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption", "dim-label"])
+        .wrap(true)
+        .build();
+
+    speed_metrics_box.append(&speed_metrics_title);
+    speed_metrics_box.append(&speed_metrics_value);
+    speed_metrics_box.append(&speed_metrics_details);
+
+    // Métrica: Espaço Total
+    let space_metrics_box = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .css_classes(vec!["metric-card"])
+        .build();
+
+    let space_metrics_title = Label::builder()
+        .label("Espaço Total")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption-heading", "dim-label"])
+        .build();
+
+    let space_metrics_value = Label::builder()
+        .label("0 B")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["title-2", "metric-value"])
+        .build();
+
+    let space_metrics_details = Label::builder()
+        .label("0 B completados")
+        .halign(gtk4::Align::Start)
+        .css_classes(vec!["caption", "dim-label"])
+        .wrap(true)
+        .build();
+
+    space_metrics_box.append(&space_metrics_title);
+    space_metrics_box.append(&space_metrics_value);
+    space_metrics_box.append(&space_metrics_details);
+
+    // Adiciona as métricas ao grid
+    metrics_grid.append(&status_metrics_box);
+    metrics_grid.append(&speed_metrics_box);
+    metrics_grid.append(&space_metrics_box);
+
+    metrics_panel.append(&metrics_title);
+    metrics_panel.append(&metrics_grid);
+
+    // Adiciona painel e lista ao container
+    list_container.append(&metrics_panel);
+    list_container.append(&list_box);
+
+    scrolled.set_child(Some(&list_container));
+
+    // Função para atualizar métricas do painel
+    let update_metrics = {
+        let state_metrics = state.clone();
+        let status_value_update = status_metrics_value.clone();
+        let status_details_update = status_metrics_details.clone();
+        let speed_value_update = speed_metrics_value.clone();
+        let speed_details_update = speed_metrics_details.clone();
+        let space_value_update = space_metrics_value.clone();
+        let space_details_update = space_metrics_details.clone();
+
+        move || {
+            if let Ok(app_state) = state_metrics.lock() {
+                if let Ok(records) = app_state.records.lock() {
+                    // Contadores por status
+                    let total_count = records.len();
+                    let active_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::InProgress && !r.was_paused
+                    ).count();
+                    let paused_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::InProgress && r.was_paused
+                    ).count();
+                    let error_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::Failed || r.status == DownloadStatus::Cancelled
+                    ).count();
+                    let completed_count = records.iter().filter(|r|
+                        r.status == DownloadStatus::Completed
+                    ).count();
+
+                    // Atualiza métrica de status
+                    status_value_update.set_text(&format!("{} total", total_count));
+                    status_details_update.set_text(&format!(
+                        "{} ativos • {} pausados • {} erros",
+                        active_count, paused_count, error_count
+                    ));
+
+                    // Velocidade - simplificada (sem armazenamento de velocidades)
+                    if active_count > 0 {
+                        speed_value_update.set_text("--");
+                        speed_details_update.set_text(&format!("{} download(s) ativo(s)", active_count));
+                    } else {
+                        speed_value_update.set_text("0 B/s");
+                        speed_details_update.set_text("Nenhum download ativo");
+                    }
+
+                    // Calcula espaço total
+                    let total_size: u64 = records.iter()
+                        .filter(|r| r.total_bytes > 0)
+                        .map(|r| r.total_bytes)
+                        .sum();
+
+                    let completed_size: u64 = records.iter()
+                        .filter(|r| r.status == DownloadStatus::Completed)
+                        .map(|r| r.downloaded_bytes)
+                        .sum();
+
+                    let total_size_str = if total_size >= 1_073_741_824 {
+                        format!("{:.2} GB", total_size as f64 / 1_073_741_824.0)
+                    } else if total_size >= 1_048_576 {
+                        format!("{:.2} MB", total_size as f64 / 1_048_576.0)
+                    } else if total_size >= 1_024 {
+                        format!("{:.2} KB", total_size as f64 / 1_024.0)
+                    } else {
+                        format!("{} B", total_size)
+                    };
+
+                    let completed_size_str = if completed_size >= 1_073_741_824 {
+                        format!("{:.2} GB", completed_size as f64 / 1_073_741_824.0)
+                    } else if completed_size >= 1_048_576 {
+                        format!("{:.2} MB", completed_size as f64 / 1_048_576.0)
+                    } else if completed_size >= 1_024 {
+                        format!("{:.2} KB", completed_size as f64 / 1_024.0)
+                    } else {
+                        format!("{} B", completed_size)
+                    };
+
+                    space_value_update.set_text(&total_size_str);
+                    space_details_update.set_text(&format!(
+                        "{} completados ({} downloads)",
+                        completed_size_str, completed_count
+                    ));
+                }
+            }
+        }
+    };
+
+    // Atualiza métricas inicialmente
+    update_metrics();
+
+    // Atualiza métricas a cada 2 segundos
+    glib::timeout_add_seconds_local(2, {
+        let update_fn = update_metrics.clone();
+        move || {
+            update_fn();
+            glib::ControlFlow::Continue
+        }
+    });
 
     // Estado vazio com botão de ação proeminente
     let empty_state_box = GtkBox::builder()
@@ -1161,6 +1390,30 @@ fn build_ui(app: &Application) {
             font-weight: 600;
             letter-spacing: 0.5px;
         }}
+
+        /* ===== PAINEL DE MÉTRICAS ===== */
+
+        /* Container do painel */
+        .metrics-panel {{
+            background-color: alpha(currentColor, 0.03);
+            border-radius: {};
+            padding: {};
+            margin-bottom: {};
+        }}
+
+        /* Cards individuais de métrica */
+        .metric-card {{
+            background-color: alpha(currentColor, 0.05);
+            border-radius: {};
+            padding: {};
+            min-width: 180px;
+        }}
+
+        /* Valor principal da métrica */
+        .metric-value {{
+            font-weight: 700;
+            color: @accent_color;
+        }}
     ",
         RADIUS_LARGE,
         // Cores da barra de progresso por status
@@ -1187,7 +1440,13 @@ fn build_ui(app: &Application) {
         COLOR_WARNING,        // paused badge background
         COLOR_WARNING,        // paused badge text
         COLOR_ERROR,          // error badge background
-        COLOR_ERROR           // error badge text
+        COLOR_ERROR,          // error badge text
+        // Painel de métricas
+        RADIUS_LARGE,         // border-radius do painel
+        "16px",               // padding do painel
+        "12px",               // margin-bottom do painel
+        RADIUS_MEDIUM,        // border-radius dos cards
+        "12px"                // padding dos cards
     );
     
     provider.load_from_data(&css);
