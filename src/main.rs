@@ -91,6 +91,48 @@ struct AppState {
     download_speeds: Arc<Mutex<std::collections::HashMap<String, u64>>>, // URL -> velocidade em bytes/s
 }
 
+// Função para sanitizar e limitar o tamanho do nome do arquivo
+fn sanitize_filename(url: &str) -> String {
+    // Extrai o nome do arquivo da URL
+    let filename = url.split('/').last().unwrap_or("download").to_string();
+
+    // Remove query parameters se houver
+    let filename_clean = filename.split('?').next().unwrap_or(&filename);
+
+    // Remove caracteres inválidos no sistema de arquivos
+    let filename_safe = filename_clean
+        .replace(['<', '>', ':', '"', '|', '?', '*'], "_")
+        .replace(['\\', '/'], "_");
+
+    // Limita o tamanho do nome (considerando extensão)
+    const MAX_FILENAME_LENGTH: usize = 200; // Limite seguro para a maioria dos sistemas
+
+    if filename_safe.len() > MAX_FILENAME_LENGTH {
+        // Tenta preservar a extensão
+        if let Some(dot_pos) = filename_safe.rfind('.') {
+            let extension = &filename_safe[dot_pos..];
+            let name_part = &filename_safe[..dot_pos];
+
+            // Se a extensão é razoável (< 10 chars), preserva ela
+            if extension.len() < 10 {
+                let max_name_len = MAX_FILENAME_LENGTH - extension.len();
+                format!("{}{}", &name_part[..max_name_len.min(name_part.len())], extension)
+            } else {
+                // Extensão muito grande, trunca tudo
+                filename_safe[..MAX_FILENAME_LENGTH].to_string()
+            }
+        } else {
+            // Sem extensão, apenas trunca
+            filename_safe[..MAX_FILENAME_LENGTH].to_string()
+        }
+    } else if filename_safe.is_empty() || filename_safe == "/" {
+        // Nome vazio ou inválido
+        "download".to_string()
+    } else {
+        filename_safe
+    }
+}
+
 fn main() {
     let app = Application::builder()
         .application_id(APP_ID)
@@ -1068,12 +1110,10 @@ fn build_ui(app: &Application) {
 
                 // Mostra preview do nome do arquivo se a URL for válida
                 if is_valid {
-                    // Extrai o nome do arquivo da URL
-                    let filename = url.split('/').last().unwrap_or("arquivo").to_string();
-                    // Remove query parameters se houver
-                    let filename_clean = filename.split('?').next().unwrap_or(&filename).to_string();
+                    // Extrai e sanitiza o nome do arquivo da URL
+                    let filename_clean = sanitize_filename(&url);
 
-                    if !filename_clean.is_empty() && filename_clean != "/" {
+                    if filename_clean != "download" {
                         preview_label_changed.set_text(&format!("📄 Arquivo: {}", filename_clean));
                         preview_box_changed.set_visible(true);
                     } else {
@@ -2193,7 +2233,7 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, con
         .css_classes(vec!["download-card"])
         .build();
 
-    let filename = url.split('/').last().unwrap_or("download").to_string();
+    let filename = sanitize_filename(url);
 
     // Header com título e tag de chunks paralelos
     let title_box = GtkBox::builder()
