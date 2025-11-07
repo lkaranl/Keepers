@@ -552,12 +552,25 @@ fn build_ui(app: &Application) {
 
             dialog.set_extra_child(Some(&main_box));
 
+            // Label de erro para duplicatas
+            let error_label = Label::builder()
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["error", "caption"])
+                .wrap(true)
+                .visible(false)
+                .build();
+
+            main_box.append(&error_label);
+
             // Conecta validação em tempo real
             let dialog_clone = dialog.clone();
+            let error_label_changed = error_label.clone();
             url_entry.connect_changed(move |entry| {
                 let url = entry.text().to_string().trim().to_string();
                 // Remove classe de erro quando usuário começar a digitar
                 entry.remove_css_class("error");
+                // Esconde mensagem de erro
+                error_label_changed.set_visible(false);
                 // Valida se tem conteúdo e começa com http:// ou https://
                 let is_valid = !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://"));
                 dialog_clone.set_response_enabled("download", is_valid);
@@ -579,17 +592,62 @@ fn build_ui(app: &Application) {
             let url_entry_response = url_entry.clone();
 
             // Conecta resposta da modal
+            let error_label_response = error_label.clone();
             dialog.connect_response(None, move |dialog, response| {
                 if response == "download" {
                     let url = url_entry_response.text().to_string().trim().to_string();
+
                     // Valida se tem conteúdo e começa com http:// ou https://
-                    if !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://")) {
+                    if url.is_empty() || (!url.starts_with("http://") && !url.starts_with("https://")) {
+                        // URL inválida
+                        url_entry_response.add_css_class("error");
+                        error_label_response.set_text("URL inválida. Use http:// ou https://");
+                        error_label_response.set_visible(true);
+                        return;
+                    }
+
+                    // Verifica se já existe um download com esta URL
+                    let mut existing_record: Option<DownloadRecord> = None;
+                    if let Ok(app_state) = state_dialog.lock() {
+                        if let Ok(records) = app_state.records.lock() {
+                            existing_record = records.iter().find(|r| r.url == url).cloned();
+                        }
+                    }
+
+                    if let Some(record) = existing_record {
+                        // URL duplicada - mostra diálogo de aviso
+                        let warning_dialog = libadwaita::MessageDialog::new(
+                            Some(dialog),
+                            Some("Download Duplicado"),
+                            Some("Este arquivo já existe na lista de downloads."),
+                        );
+
+                        let status_text = match record.status {
+                            DownloadStatus::InProgress => if record.was_paused { "pausado" } else { "em progresso" },
+                            DownloadStatus::Completed => "concluído",
+                            DownloadStatus::Failed => "com falha",
+                            DownloadStatus::Cancelled => "cancelado",
+                        };
+
+                        let body_text = format!(
+                            "Arquivo: {}\n\nStatus: {}\nAdicionado em: {}",
+                            record.filename,
+                            status_text,
+                            record.date_added.format("%d/%m/%Y às %H:%M")
+                        );
+
+                        warning_dialog.set_body(&body_text);
+                        warning_dialog.add_response("ok", "Entendi");
+                        warning_dialog.set_response_appearance("ok", libadwaita::ResponseAppearance::Suggested);
+                        warning_dialog.set_default_response(Some("ok"));
+                        warning_dialog.set_close_response("ok");
+
+                        warning_dialog.present();
+                    } else {
+                        // URL válida e não duplicada, pode adicionar
                         add_download(&list_box_dialog, &url, &state_dialog, &content_stack_dialog);
                         content_stack_dialog.set_visible_child_name("list");
                         dialog.close();
-                    } else {
-                        // Se não for válido, não fecha a modal e mostra feedback visual
-                        url_entry_response.add_css_class("error");
                     }
                 } else {
                     dialog.close();
