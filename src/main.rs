@@ -43,7 +43,7 @@ const OPACITY_CANCELLED: f32 = 0.65;    // Items cancelados
 
 #[derive(Clone, Debug)]
 enum DownloadMessage {
-    Progress(f64, String, String, String, bool), // (progress, status_text, speed, eta, parallel_chunks)
+    Progress(f64, String, String, String, bool, u64), // (progress, status_text, speed, eta, parallel_chunks, speed_bytes)
     Complete,
     Error(String),
 }
@@ -88,6 +88,7 @@ struct AppState {
     downloads: Vec<Arc<Mutex<DownloadTask>>>,
     records: Arc<Mutex<Vec<DownloadRecord>>>,
     config: Arc<Mutex<AppConfig>>,
+    download_speeds: Arc<Mutex<std::collections::HashMap<String, u64>>>, // URL -> velocidade em bytes/s
 }
 
 fn main() {
@@ -263,6 +264,7 @@ fn build_ui(app: &Application) {
         downloads: Vec::new(),
         records: Arc::new(Mutex::new(saved_records.clone())),
         config: Arc::new(Mutex::new(config)),
+        download_speeds: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }));
 
     let window = AdwApplicationWindow::builder()
@@ -747,13 +749,26 @@ fn build_ui(app: &Application) {
                         active_count, paused_count, error_count
                     ));
 
-                    // Velocidade - simplificada (sem armazenamento de velocidades)
-                    if active_count > 0 {
-                        speed_value_update.set_text("--");
-                        speed_details_update.set_text(&format!("{} download(s) ativo(s)", active_count));
-                    } else {
-                        speed_value_update.set_text("0 B/s");
-                        speed_details_update.set_text("Nenhum download ativo");
+                    // Calcula velocidade agregada de todos os downloads ativos
+                    if let Ok(speeds) = app_state.download_speeds.lock() {
+                        let total_speed: u64 = speeds.values().sum();
+                        if total_speed > 0 {
+                            let speed_str = if total_speed >= 1_048_576 {
+                                format!("{:.2} MB/s", total_speed as f64 / 1_048_576.0)
+                            } else if total_speed >= 1_024 {
+                                format!("{:.2} KB/s", total_speed as f64 / 1_024.0)
+                            } else {
+                                format!("{} B/s", total_speed)
+                            };
+                            speed_value_update.set_text(&speed_str);
+                            speed_details_update.set_text(&format!("{} download(s) ativo(s)", active_count));
+                        } else if active_count > 0 {
+                            speed_value_update.set_text("0 B/s");
+                            speed_details_update.set_text("Calculando velocidade...");
+                        } else {
+                            speed_value_update.set_text("0 B/s");
+                            speed_details_update.set_text("Nenhum download ativo");
+                        }
                     }
 
                     // Calcula espaço total
@@ -2490,16 +2505,24 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, con
     let download_task_clone_msg = download_task.clone();
     let record_url_clone = record_url.clone();
     let state_records_clone = state_records.clone();
+    let state_clone = state.clone();
 
     glib::spawn_future_local(async move {
         let mut last_save = std::time::Instant::now();
 
         while let Ok(msg) = msg_rx.recv().await {
             match msg {
-                DownloadMessage::Progress(progress, status_text, speed, eta, parallel_chunks) => {
+                DownloadMessage::Progress(progress, status_text, speed, eta, parallel_chunks, speed_bytes) => {
                     progress_bar_clone.set_fraction(progress);
                     progress_bar_clone.set_text(Some(&format!("{:.0}%", progress * 100.0)));
-                    
+
+                    // Armazena velocidade atual no HashMap
+                    if let Ok(app_state) = state_clone.lock() {
+                        if let Ok(mut speeds) = app_state.download_speeds.lock() {
+                            speeds.insert(record_url_clone.clone(), speed_bytes);
+                        }
+                    }
+
                     // Atualiza tamanho do arquivo se disponível no registro
                     if let Ok(records) = state_records_clone.lock() {
                         if let Some(record) = records.iter().find(|r| r.url == record_url_clone) {
@@ -2586,7 +2609,14 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, con
                 DownloadMessage::Complete => {
                     progress_bar_clone.set_fraction(1.0);
                     progress_bar_clone.set_text(Some("100%"));
-                    
+
+                    // Remove velocidade do HashMap quando completa
+                    if let Ok(app_state) = state_clone.lock() {
+                        if let Ok(mut speeds) = app_state.download_speeds.lock() {
+                            speeds.remove(&record_url_clone);
+                        }
+                    }
+
                     // Atualiza badge para completo (verde)
                     status_badge_clone.remove_css_class("in-progress");
                     status_badge_clone.remove_css_class("paused");
@@ -2635,6 +2665,13 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, con
                     break;
                 }
                 DownloadMessage::Error(err) => {
+                    // Remove velocidade do HashMap quando há erro
+                    if let Ok(app_state) = state_clone.lock() {
+                        if let Ok(mut speeds) = app_state.download_speeds.lock() {
+                            speeds.remove(&record_url_clone);
+                        }
+                    }
+
                     // Atualiza ícone de status e badge baseado no tipo de erro
                     let (icon_name, badge_class, status) = if err.contains("Cancelado") {
                         ("process-stop-symbolic", "cancelled", DownloadStatus::Cancelled) // cinza
@@ -3489,7 +3526,7 @@ async fn download_chunk(
                 };
 
                 let status = format!("{}/{}", format_bytes(total_downloaded), format_bytes(total_size));
-                let _ = tx.send(DownloadMessage::Progress(progress_ratio, status, speed_text, eta_text, true)).await;
+                let _ = tx.send(DownloadMessage::Progress(progress_ratio, status, speed_text, eta_text, true, speed_bytes as u64)).await;
 
                 *last_update_guard = Instant::now();
                 *last_downloaded_guard = total_downloaded;
@@ -3560,7 +3597,7 @@ async fn download_sequential(
     if downloaded > 0 && total_size > 0 {
         let progress = downloaded as f64 / total_size as f64;
         let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
-        let _ = tx.send(DownloadMessage::Progress(progress, status, String::new(), String::new(), parallel_chunks)).await;
+        let _ = tx.send(DownloadMessage::Progress(progress, status, String::new(), String::new(), parallel_chunks, 0)).await;
     }
 
     while let Some(chunk_result) = stream.next().await {
@@ -3626,7 +3663,7 @@ async fn download_sequential(
 
             let status = format!("{}/{}", format_bytes(downloaded), format_bytes(total_size));
 
-            let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text, eta_text, parallel_chunks)).await;
+            let _ = tx.send(DownloadMessage::Progress(progress, status, speed_text, eta_text, parallel_chunks, speed_bytes as u64)).await;
 
             last_update = Instant::now();
             last_downloaded = downloaded;
