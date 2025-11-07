@@ -302,15 +302,16 @@ fn build_ui(app: &Application) {
 
     let menu = gio::Menu::new();
     menu.append(Some("Mostrar Janela"), Some("app.show"));
-    
+
     // Submenu de configurações
     let config_menu = gio::Menu::new();
     config_menu.append(Some("Pasta de Downloads"), Some("app.config-downloads"));
-    
+
     let config_section = gio::Menu::new();
     config_section.append_submenu(Some("Configurações"), &config_menu);
     menu.append_section(None, &config_section);
-    
+
+    menu.append(Some("Sobre"), Some("app.about"));
     menu.append(Some("Sair"), Some("app.quit"));
 
     let popover = PopoverMenu::from_model(Some(&menu));
@@ -363,6 +364,42 @@ fn build_ui(app: &Application) {
         dialog.show();
     });
     app.add_action(&config_action);
+
+    // Ação para mostrar diálogo "Sobre"
+    let about_action = gio::SimpleAction::new("about", None);
+    let window_clone_about = window.clone();
+    about_action.connect_activate(move |_, _| {
+        let about_window = libadwaita::AboutWindow::builder()
+            .transient_for(&window_clone_about)
+            .application_name("Keeper")
+            .application_icon("folder-download")
+            .developer_name("Karan Luciano")
+            .version("1.0.0")
+            .comments("Gerenciador minimalista de downloads com suporte a downloads paralelos")
+            .website("https://github.com/KaranLuciano/Keeper")
+            .issue_url("https://github.com/KaranLuciano/Keeper/issues")
+            .copyright("© 2025 Karan Luciano")
+            .license_type(gtk4::License::MitX11)
+            .build();
+
+        // Adiciona desenvolvedores
+        about_window.set_developers(&["Karan Luciano"]);
+
+        // Adiciona tecnologias utilizadas
+        about_window.add_credit_section(
+            Some("Tecnologias"),
+            &[
+                "Rust - Linguagem de programação",
+                "GTK4 - Interface gráfica",
+                "libadwaita - Design GNOME",
+                "Tokio - Runtime assíncrono",
+                "Reqwest - Cliente HTTP",
+            ],
+        );
+
+        about_window.present();
+    });
+    app.add_action(&about_action);
 
     main_box.append(&header);
 
