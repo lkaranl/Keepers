@@ -279,6 +279,9 @@ fn build_ui(app: &Application) {
     }
 
 
+    // ToastOverlay para notificações in-app
+    let toast_overlay = libadwaita::ToastOverlay::new();
+
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
     let header = HeaderBar::new();
@@ -323,9 +326,11 @@ fn build_ui(app: &Application) {
     let config_action = gio::SimpleAction::new("config-downloads", None);
     let window_clone_config = window.clone();
     let state_clone_config = state.clone();
+    let toast_overlay_config = toast_overlay.clone();
     config_action.connect_activate(move |_, _| {
         let config_window = window_clone_config.clone();
         let config_state = state_clone_config.clone();
+        let toast_overlay_response = toast_overlay_config.clone();
 
         // Cria diálogo de seleção de pasta
         let dialog = FileChooserDialog::new(
@@ -344,15 +349,30 @@ fn build_ui(app: &Application) {
                 if let Some(file) = dialog.file() {
                     if let Some(path) = file.path() {
                         let path_str = path.to_string_lossy().to_string();
-
-                        println!("Pasta selecionada: {}", path_str);
+                        let path_display = path.clone();
 
                         // Atualiza configuração
                         if let Ok(app_state) = config_state_response.lock() {
                             if let Ok(mut config) = app_state.config.lock() {
                                 config.download_directory = Some(path_str.clone());
                                 save_config(&config);
-                                println!("Configuração salva com sucesso!");
+
+                                // Mostra toast com confirmação
+                                let toast = libadwaita::Toast::new(&format!(
+                                    "Pasta de downloads alterada para:\n{}",
+                                    path_str
+                                ));
+                                toast.set_timeout(5);
+                                toast.set_priority(libadwaita::ToastPriority::High);
+
+                                // Adiciona botão de ação para abrir a pasta
+                                toast.set_button_label(Some("Abrir Pasta"));
+                                let path_for_action = path_display.clone();
+                                toast.connect_button_clicked(move |_| {
+                                    let _ = open::that(&path_for_action);
+                                });
+
+                                toast_overlay_response.add_toast(toast);
                             }
                         }
                     }
@@ -782,7 +802,8 @@ fn build_ui(app: &Application) {
         show_add_dialog();
     });
 
-    window.set_content(Some(&main_box));
+    toast_overlay.set_child(Some(&main_box));
+    window.set_content(Some(&toast_overlay));
     
     // Adiciona CSS customizado usando design tokens
     let provider = CssProvider::new();
