@@ -539,6 +539,77 @@ fn build_ui(app: &Application) {
                 .width_request(450)
                 .build();
 
+            // Tenta capturar URL do clipboard automaticamente
+            if let Some(display) = gtk4::gdk::Display::default() {
+                let clipboard = display.clipboard();
+                let url_entry_clone = url_entry.clone();
+                clipboard.read_text_async(None::<&gio::Cancellable>, move |result| {
+                    if let Ok(Some(text)) = result {
+                        let text = text.to_string().trim().to_string();
+                        // Verifica se é uma URL válida
+                        if (text.starts_with("http://") || text.starts_with("https://")) && !text.contains('\n') {
+                            url_entry_clone.set_text(&text);
+                        }
+                    }
+                });
+            }
+
+            // Preview do nome do arquivo (inicialmente invisível)
+            let preview_box = GtkBox::builder()
+                .orientation(Orientation::Horizontal)
+                .spacing(8)
+                .halign(gtk4::Align::Start)
+                .visible(false)
+                .build();
+
+            let preview_icon = gtk4::Image::builder()
+                .icon_name("document-save-symbolic")
+                .pixel_size(16)
+                .build();
+
+            let preview_label = Label::builder()
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["dim-label", "caption"])
+                .ellipsize(gtk4::pango::EllipsizeMode::End)
+                .build();
+
+            preview_box.append(&preview_icon);
+            preview_box.append(&preview_label);
+
+            // Histórico recente de URLs (últimos 5 downloads)
+            let history_expander = libadwaita::ExpanderRow::builder()
+                .title("Histórico Recente")
+                .subtitle("Clique para reutilizar uma URL anterior")
+                .build();
+
+            // Pega os últimos 5 downloads do histórico
+            if let Ok(app_state) = state_clone.lock() {
+                if let Ok(records) = app_state.records.lock() {
+                    let recent_urls: Vec<_> = records.iter()
+                        .rev()
+                        .take(5)
+                        .map(|r| (r.url.clone(), r.filename.clone()))
+                        .collect();
+
+                    for (url_hist, filename_hist) in recent_urls {
+                        let history_row = libadwaita::ActionRow::builder()
+                            .title(&filename_hist)
+                            .subtitle(&url_hist)
+                            .activatable(true)
+                            .build();
+
+                        let url_entry_hist = url_entry.clone();
+                        let url_hist_clone = url_hist.clone();
+                        history_row.connect_activated(move |_| {
+                            url_entry_hist.set_text(&url_hist_clone);
+                            url_entry_hist.grab_focus();
+                        });
+
+                        history_expander.add_row(&history_row);
+                    }
+                }
+            }
+
             // Texto de ajuda
             let help_label = Label::builder()
                 .label("O download iniciará automaticamente após adicionar")
@@ -548,7 +619,19 @@ fn build_ui(app: &Application) {
 
             main_box.append(&label);
             main_box.append(&url_entry);
+            main_box.append(&preview_box);
             main_box.append(&help_label);
+
+            // Só mostra histórico se houver registros
+            if history_expander.first_child().is_some() {
+                let separator = gtk4::Separator::builder()
+                    .orientation(Orientation::Horizontal)
+                    .margin_top(12)
+                    .margin_bottom(12)
+                    .build();
+                main_box.append(&separator);
+                main_box.append(&history_expander);
+            }
 
             dialog.set_extra_child(Some(&main_box));
 
@@ -565,6 +648,8 @@ fn build_ui(app: &Application) {
             // Conecta validação em tempo real
             let dialog_clone = dialog.clone();
             let error_label_changed = error_label.clone();
+            let preview_box_changed = preview_box.clone();
+            let preview_label_changed = preview_label.clone();
             url_entry.connect_changed(move |entry| {
                 let url = entry.text().to_string().trim().to_string();
                 // Remove classe de erro quando usuário começar a digitar
@@ -574,12 +659,26 @@ fn build_ui(app: &Application) {
                 // Valida se tem conteúdo e começa com http:// ou https://
                 let is_valid = !url.is_empty() && (url.starts_with("http://") || url.starts_with("https://"));
                 dialog_clone.set_response_enabled("download", is_valid);
-                // Define resposta padrão apenas se válido (para permitir Enter)
+
+                // Mostra preview do nome do arquivo se a URL for válida
                 if is_valid {
+                    // Extrai o nome do arquivo da URL
+                    let filename = url.split('/').last().unwrap_or("arquivo").to_string();
+                    // Remove query parameters se houver
+                    let filename_clean = filename.split('?').next().unwrap_or(&filename).to_string();
+
+                    if !filename_clean.is_empty() && filename_clean != "/" {
+                        preview_label_changed.set_text(&format!("📄 Arquivo: {}", filename_clean));
+                        preview_box_changed.set_visible(true);
+                    } else {
+                        preview_box_changed.set_visible(false);
+                    }
+
                     dialog_clone.set_default_response(Some("download"));
                     // Reativa o activates_default quando válido
                     entry.set_activates_default(true);
                 } else {
+                    preview_box_changed.set_visible(false);
                     dialog_clone.set_default_response(None);
                     entry.set_activates_default(false);
                 }
