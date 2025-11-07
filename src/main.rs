@@ -1232,6 +1232,241 @@ fn add_completed_download(list_box: &ListBox, record: &DownloadRecord, state: &A
         primary_actions_box.append(&open_folder_btn);
     }
 
+    // Botão de informações (sempre visível)
+    let info_btn = Button::builder()
+        .icon_name("info-symbolic")
+        .tooltip_text("Ver estatísticas e detalhes")
+        .build();
+
+    let record_clone = record.clone();
+    info_btn.connect_clicked(move |_| {
+        // Cria diálogo de informações
+        let dialog = libadwaita::MessageDialog::new(
+            None::<&AdwApplicationWindow>,
+            Some("Informações do Download"),
+            None,
+        );
+
+        dialog.add_response("close", "Fechar");
+        dialog.set_response_appearance("close", libadwaita::ResponseAppearance::Default);
+        dialog.set_default_response(Some("close"));
+        dialog.set_close_response("close");
+
+        // Container principal
+        let main_box = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(16)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(16)
+            .margin_end(16)
+            .build();
+
+        // Nome do arquivo
+        let filename_group = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .build();
+
+        let filename_label = Label::builder()
+            .label("Nome do Arquivo")
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["title-4"])
+            .build();
+
+        let filename_value = Label::builder()
+            .label(&record_clone.filename)
+            .halign(gtk4::Align::Start)
+            .wrap(true)
+            .selectable(true)
+            .css_classes(vec!["caption"])
+            .build();
+
+        filename_group.append(&filename_label);
+        filename_group.append(&filename_value);
+
+        // URL de origem com botão de copiar
+        let url_group = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .build();
+
+        let url_label = Label::builder()
+            .label("URL de Origem")
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["title-4"])
+            .build();
+
+        let url_box = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(8)
+            .build();
+
+        let url_value = Label::builder()
+            .label(&record_clone.url)
+            .halign(gtk4::Align::Start)
+            .hexpand(true)
+            .wrap(true)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .selectable(true)
+            .css_classes(vec!["caption"])
+            .build();
+
+        let copy_btn = Button::builder()
+            .icon_name("edit-copy-symbolic")
+            .tooltip_text("Copiar URL")
+            .valign(gtk4::Align::Start)
+            .build();
+
+        let record_url_copy = record_clone.url.clone();
+        let dialog_clone = dialog.clone();
+        copy_btn.connect_clicked(move |_| {
+            if let Some(display) = gtk4::gdk::Display::default() {
+                let clipboard = display.clipboard();
+                clipboard.set_text(&record_url_copy);
+
+                // Feedback visual temporário
+                dialog_clone.set_body("URL copiada para a área de transferência");
+            }
+        });
+
+        url_box.append(&url_value);
+        url_box.append(&copy_btn);
+        url_group.append(&url_label);
+        url_group.append(&url_box);
+
+        // Tamanho do arquivo
+        let size_group = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .build();
+
+        let size_label = Label::builder()
+            .label("Tamanho")
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["title-4"])
+            .build();
+
+        let size_value = Label::builder()
+            .label(&format_file_size(record_clone.total_bytes))
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["caption"])
+            .build();
+
+        size_group.append(&size_label);
+        size_group.append(&size_value);
+
+        // Status
+        let status_group = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .build();
+
+        let status_label = Label::builder()
+            .label("Status")
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["title-4"])
+            .build();
+
+        let status_text = match record_clone.status {
+            DownloadStatus::InProgress => if record_clone.was_paused { "Pausado" } else { "Em Progresso" },
+            DownloadStatus::Completed => "Concluído",
+            DownloadStatus::Failed => "Falhou",
+            DownloadStatus::Cancelled => "Cancelado",
+        };
+
+        let status_value = Label::builder()
+            .label(status_text)
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["caption"])
+            .build();
+
+        status_group.append(&status_label);
+        status_group.append(&status_value);
+
+        // Data de início
+        let date_group = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .build();
+
+        let date_label = Label::builder()
+            .label("Data de Início")
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["title-4"])
+            .build();
+
+        let date_value = Label::builder()
+            .label(&format!("{}", record_clone.date_added.format("%d/%m/%Y às %H:%M:%S")))
+            .halign(gtk4::Align::Start)
+            .css_classes(vec!["caption"])
+            .build();
+
+        date_group.append(&date_label);
+        date_group.append(&date_value);
+
+        // Data de conclusão (se completado)
+        if let Some(completed_date) = record_clone.date_completed {
+            let completed_group = GtkBox::builder()
+                .orientation(Orientation::Vertical)
+                .spacing(4)
+                .build();
+
+            let completed_label = Label::builder()
+                .label("Data de Conclusão")
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["title-4"])
+                .build();
+
+            let completed_value = Label::builder()
+                .label(&format!("{}", completed_date.format("%d/%m/%Y às %H:%M:%S")))
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["caption"])
+                .build();
+
+            completed_group.append(&completed_label);
+            completed_group.append(&completed_value);
+            main_box.append(&completed_group);
+        }
+
+        // Caminho do arquivo (se completado)
+        if let Some(ref file_path) = record_clone.file_path {
+            let path_group = GtkBox::builder()
+                .orientation(Orientation::Vertical)
+                .spacing(4)
+                .build();
+
+            let path_label = Label::builder()
+                .label("Caminho do Arquivo")
+                .halign(gtk4::Align::Start)
+                .css_classes(vec!["title-4"])
+                .build();
+
+            let path_value = Label::builder()
+                .label(file_path)
+                .halign(gtk4::Align::Start)
+                .wrap(true)
+                .selectable(true)
+                .css_classes(vec!["caption"])
+                .build();
+
+            path_group.append(&path_label);
+            path_group.append(&path_value);
+            main_box.append(&path_group);
+        }
+
+        main_box.append(&filename_group);
+        main_box.append(&url_group);
+        main_box.append(&size_group);
+        main_box.append(&status_group);
+        main_box.append(&date_group);
+
+        dialog.set_extra_child(Some(&main_box));
+        dialog.present();
+    });
+
+    primary_actions_box.append(&info_btn);
+
     // Botão de excluir
     let delete_btn = Button::builder()
         .icon_name("user-trash-symbolic")
@@ -1516,10 +1751,17 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, con
         .css_classes(vec!["destructive-action"])
         .build();
 
+    // Botão de informações (sempre visível)
+    let info_btn = Button::builder()
+        .icon_name("info-symbolic")
+        .tooltip_text("Ver estatísticas e detalhes")
+        .build();
+
     // Organiza botões de forma consistente
     primary_actions_box.append(&open_btn);
     primary_actions_box.append(&open_folder_btn);
     primary_actions_box.append(&pause_btn);
+    primary_actions_box.append(&info_btn);
 
     destructive_actions_box.append(&cancel_btn);
     destructive_actions_box.append(&delete_btn);
@@ -1830,6 +2072,240 @@ fn add_download(list_box: &ListBox, url: &str, state: &Arc<Mutex<AppState>>, con
                         eprintln!("Erro ao abrir pasta: {}", e);
                     }
                 }
+            }
+        }
+    });
+
+    // Handler para botão de informações
+    let state_records_clone_info = state_records.clone();
+    let record_url_clone_info = record_url.clone();
+    info_btn.connect_clicked(move |_| {
+        // Pega as informações do registro
+        if let Ok(records) = state_records_clone_info.lock() {
+            if let Some(record) = records.iter().find(|r| r.url == record_url_clone_info) {
+                // Cria diálogo de informações
+                let dialog = libadwaita::MessageDialog::new(
+                    None::<&AdwApplicationWindow>,
+                    Some("Informações do Download"),
+                    None,
+                );
+
+                dialog.add_response("close", "Fechar");
+                dialog.set_response_appearance("close", libadwaita::ResponseAppearance::Default);
+                dialog.set_default_response(Some("close"));
+                dialog.set_close_response("close");
+
+                // Container principal
+                let main_box = GtkBox::builder()
+                    .orientation(Orientation::Vertical)
+                    .spacing(16)
+                    .margin_top(12)
+                    .margin_bottom(12)
+                    .margin_start(16)
+                    .margin_end(16)
+                    .build();
+
+                // Nome do arquivo
+                let filename_group = GtkBox::builder()
+                    .orientation(Orientation::Vertical)
+                    .spacing(4)
+                    .build();
+
+                let filename_label = Label::builder()
+                    .label("Nome do Arquivo")
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["title-4"])
+                    .build();
+
+                let filename_value = Label::builder()
+                    .label(&record.filename)
+                    .halign(gtk4::Align::Start)
+                    .wrap(true)
+                    .selectable(true)
+                    .css_classes(vec!["caption"])
+                    .build();
+
+                filename_group.append(&filename_label);
+                filename_group.append(&filename_value);
+
+                // URL de origem com botão de copiar
+                let url_group = GtkBox::builder()
+                    .orientation(Orientation::Vertical)
+                    .spacing(4)
+                    .build();
+
+                let url_label = Label::builder()
+                    .label("URL de Origem")
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["title-4"])
+                    .build();
+
+                let url_box = GtkBox::builder()
+                    .orientation(Orientation::Horizontal)
+                    .spacing(8)
+                    .build();
+
+                let url_value = Label::builder()
+                    .label(&record.url)
+                    .halign(gtk4::Align::Start)
+                    .hexpand(true)
+                    .wrap(true)
+                    .ellipsize(gtk4::pango::EllipsizeMode::End)
+                    .selectable(true)
+                    .css_classes(vec!["caption"])
+                    .build();
+
+                let copy_btn = Button::builder()
+                    .icon_name("edit-copy-symbolic")
+                    .tooltip_text("Copiar URL")
+                    .valign(gtk4::Align::Start)
+                    .build();
+
+                let record_url_copy = record.url.clone();
+                let dialog_clone = dialog.clone();
+                copy_btn.connect_clicked(move |_| {
+                    if let Some(display) = gtk4::gdk::Display::default() {
+                        let clipboard = display.clipboard();
+                        clipboard.set_text(&record_url_copy);
+
+                        // Feedback visual temporário
+                        dialog_clone.set_body("URL copiada para a área de transferência");
+                    }
+                });
+
+                url_box.append(&url_value);
+                url_box.append(&copy_btn);
+                url_group.append(&url_label);
+                url_group.append(&url_box);
+
+                // Tamanho do arquivo
+                let size_group = GtkBox::builder()
+                    .orientation(Orientation::Vertical)
+                    .spacing(4)
+                    .build();
+
+                let size_label = Label::builder()
+                    .label("Tamanho")
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["title-4"])
+                    .build();
+
+                let size_value = Label::builder()
+                    .label(&format_file_size(record.total_bytes))
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["caption"])
+                    .build();
+
+                size_group.append(&size_label);
+                size_group.append(&size_value);
+
+                // Status
+                let status_group = GtkBox::builder()
+                    .orientation(Orientation::Vertical)
+                    .spacing(4)
+                    .build();
+
+                let status_label = Label::builder()
+                    .label("Status")
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["title-4"])
+                    .build();
+
+                let status_text = match record.status {
+                    DownloadStatus::InProgress => if record.was_paused { "Pausado" } else { "Em Progresso" },
+                    DownloadStatus::Completed => "Concluído",
+                    DownloadStatus::Failed => "Falhou",
+                    DownloadStatus::Cancelled => "Cancelado",
+                };
+
+                let status_value = Label::builder()
+                    .label(status_text)
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["caption"])
+                    .build();
+
+                status_group.append(&status_label);
+                status_group.append(&status_value);
+
+                // Data de início
+                let date_group = GtkBox::builder()
+                    .orientation(Orientation::Vertical)
+                    .spacing(4)
+                    .build();
+
+                let date_label = Label::builder()
+                    .label("Data de Início")
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["title-4"])
+                    .build();
+
+                let date_value = Label::builder()
+                    .label(&format!("{}", record.date_added.format("%d/%m/%Y às %H:%M:%S")))
+                    .halign(gtk4::Align::Start)
+                    .css_classes(vec!["caption"])
+                    .build();
+
+                date_group.append(&date_label);
+                date_group.append(&date_value);
+
+                // Data de conclusão (se completado)
+                if let Some(completed_date) = record.date_completed {
+                    let completed_group = GtkBox::builder()
+                        .orientation(Orientation::Vertical)
+                        .spacing(4)
+                        .build();
+
+                    let completed_label = Label::builder()
+                        .label("Data de Conclusão")
+                        .halign(gtk4::Align::Start)
+                        .css_classes(vec!["title-4"])
+                        .build();
+
+                    let completed_value = Label::builder()
+                        .label(&format!("{}", completed_date.format("%d/%m/%Y às %H:%M:%S")))
+                        .halign(gtk4::Align::Start)
+                        .css_classes(vec!["caption"])
+                        .build();
+
+                    completed_group.append(&completed_label);
+                    completed_group.append(&completed_value);
+                    main_box.append(&completed_group);
+                }
+
+                // Caminho do arquivo (se completado)
+                if let Some(ref file_path) = record.file_path {
+                    let path_group = GtkBox::builder()
+                        .orientation(Orientation::Vertical)
+                        .spacing(4)
+                        .build();
+
+                    let path_label = Label::builder()
+                        .label("Caminho do Arquivo")
+                        .halign(gtk4::Align::Start)
+                        .css_classes(vec!["title-4"])
+                        .build();
+
+                    let path_value = Label::builder()
+                        .label(file_path)
+                        .halign(gtk4::Align::Start)
+                        .wrap(true)
+                        .selectable(true)
+                        .css_classes(vec!["caption"])
+                        .build();
+
+                    path_group.append(&path_label);
+                    path_group.append(&path_value);
+                    main_box.append(&path_group);
+                }
+
+                main_box.append(&filename_group);
+                main_box.append(&url_group);
+                main_box.append(&size_group);
+                main_box.append(&status_group);
+                main_box.append(&date_group);
+
+                dialog.set_extra_child(Some(&main_box));
+                dialog.present();
             }
         }
     });
