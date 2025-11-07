@@ -1,8 +1,8 @@
 
 [package]
-name = "downstream"
+name = "keepers"
 version = "1.0.0"
-edition = "2021"
+edition = "2025"
 authors = ["Karan Luciano"]
 description = "Gerenciador de downloads."
 
