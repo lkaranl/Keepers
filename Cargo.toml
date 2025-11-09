@@ -2,9 +2,14 @@
 [package]
 name = "keepers"
 version = "1.0.0"
-edition = "2024"
+edition = "2021"
 authors = ["Karan Luciano"]
 description = "Gerenciador de downloads."
+
+[package.metadata.appimage]
+bin = "/home/karan/Documentos/GitHub/Keeper/target/release/keepers"
+icon = "/home/karan/Documentos/GitHub/Keeper/assets/icon.png"
+desktop_file = "/home/karan/Documentos/GitHub/Keeper/assets/keepers.desktop"
 
 [dependencies]
 gtk4 = { version = "0.7", features = ["v4_6"] }

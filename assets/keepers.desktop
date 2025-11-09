@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Keepers
+Comment=Minha aplicação Keeper
+Exec=keepers
+Icon=keepers
+Type=Application
+Categories=Utility;
