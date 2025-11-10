@@ -7,9 +7,7 @@ authors = ["Karan Luciano"]
 description = "Gerenciador de downloads."
 
 [package.metadata.appimage]
-bin = "/home/karan/Documentos/GitHub/Keeper/target/release/keepers"
-icon = "/home/karan/Documentos/GitHub/Keeper/assets/icon.png"
-desktop_file = "/home/karan/Documentos/GitHub/Keeper/assets/keepers.desktop"
+assets = ["assets/usr"]
 
 [dependencies]
 gtk4 = { version = "0.7", features = ["v4_6"] }

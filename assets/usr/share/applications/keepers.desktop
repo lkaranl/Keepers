@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Keepers
+Comment=Gerenciador de downloads
+Exec=keepers
+Icon=keepers
+Type=Application
+Categories=Network;FileTransfer;
+StartupNotify=true
+

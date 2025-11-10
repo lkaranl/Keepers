@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.karansluciano.keepers</id>
+  <name>Keepers</name>
+  <summary>Gerencie downloads com mais controle e velocidade</summary>
+  <description>
+    <p>Keepers é um gerenciador de downloads com interface moderna construído com GTK4 e libadwaita.</p>
+  </description>
+  <launchable type="desktop-id">keepers.desktop</launchable>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <url type="homepage">https://github.com/lkaranl/Keepers</url>
+  <url type="bugtracker">https://github.com/lkaranl/Keepers/issues</url>
+  <provides>
+    <binary>keepers</binary>
+  </provides>
+</component>
+

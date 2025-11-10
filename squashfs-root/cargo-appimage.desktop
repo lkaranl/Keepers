@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=keepers
+Exec=keepers
+Icon=icon
+Type=Application
+Categories=Utility;
+X-AppImage-Version=1.0.0
